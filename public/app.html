@@ -12,7 +12,6 @@
 <body>
 <div id="root"></div>
 <script type="text/babel" data-presets="react">
-// Persist settings in localStorage on your own site (Claude artifact storage isn't here).
 if (!window.storage) {
   window.storage = {
     get: async (k) => { const v = localStorage.getItem(k); return v == null ? null : { key: k, value: v }; },
@@ -42,18 +41,22 @@ const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 const SavedCtx = createContext({ saved: [], add: () => {}, remove: () => {}, update: () => {} });
 const ProfileCtx = createContext({ profile: {}, setProfile: () => {} });
+const AccentCtx = createContext("#c2581f"); // current group accent
 
-// Backend connection (your deployed Vercel server). Set once in the Backend drawer.
-const BACKEND = { url: "", key: "" };
+// Same-origin API (the app is served from the same Vercel project as /api/*).
+const API_GENERATE = "/api/generate";
+const API_ANALYZE = "/api/analyze";
+const API_LOGIN = "/api/login";
+let TOKEN = "";
 
 async function askClaude(system, user) {
-  if (!BACKEND.url) throw new Error("Connect your backend first (tap ⚡ Backend, paste your /api/generate URL).");
-  const res = await fetch(BACKEND.url, {
+  const res = await fetch(API_GENERATE, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-app-key": BACKEND.key },
+    headers: { "Content-Type": "application/json", "x-app-token": TOKEN },
     body: JSON.stringify({ system, user, max_tokens: 1600 }),
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { TOKEN = ""; try { await window.storage.delete("closeassist-token"); } catch {} window.dispatchEvent(new Event("closeassist-logout")); throw new Error("Session expired — please log in again."); }
   if (!res.ok) throw new Error(data.error || ("Request failed (" + res.status + ")"));
   return (data.text || "").trim();
 }
@@ -129,11 +132,13 @@ function Chips({ options, value, onChange }) {
 }
 
 function RunButton({ onClick, loading, children }) {
-  return <button onClick={onClick} disabled={loading} style={{ fontFamily: SAN, fontSize: 15, fontWeight: 700, letterSpacing: 0.4, color: C.cream, background: loading ? C.faint : C.amber, border: "none", borderRadius: 2, padding: "13px 26px", cursor: loading ? "default" : "pointer", boxShadow: loading ? "none" : `4px 4px 0 ${C.ink}` }}>{loading ? "thinking…" : children}</button>;
+  const accent = useContext(AccentCtx);
+  return <button onClick={onClick} disabled={loading} style={{ fontFamily: SAN, fontSize: 15, fontWeight: 700, letterSpacing: 0.4, color: C.cream, background: loading ? C.faint : accent, border: "none", borderRadius: 2, padding: "13px 26px", cursor: loading ? "default" : "pointer", boxShadow: loading ? "none" : `4px 4px 0 ${C.ink}` }}>{loading ? "thinking…" : children}</button>;
 }
 
 function Card({ text, index, noun, onRefine }) {
   const { add } = useContext(SavedCtx);
+  const accent = useContext(AccentCtx);
   const [saved, setSaved] = useState(false);
   const [open, setOpen] = useState(false);
   const [instr, setInstr] = useState("");
@@ -141,9 +146,9 @@ function Card({ text, index, noun, onRefine }) {
   const doSave = () => { add({ text, noun }); setSaved(true); setTimeout(() => setSaved(false), 1400); };
   const doRefine = async () => { if (!instr.trim()) return; setBusy(true); try { await onRefine(index, instr); setInstr(""); setOpen(false); } finally { setBusy(false); } };
   return (
-    <div style={{ background: C.paper, border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.amber}`, borderRadius: 2, padding: "16px 18px", animation: `rise .4s ${index * 0.06}s both` }}>
+    <div style={{ background: C.paper, border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${accent}`, borderRadius: 2, padding: "16px 18px", animation: `rise .4s ${index * 0.06}s both` }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <span style={{ fontFamily: SER, fontStyle: "italic", fontSize: 14, color: C.faint }}>{noun} {index + 1}</span>
+        <span style={{ fontFamily: SER, fontStyle: "italic", fontSize: 14, color: accent }}>{noun} {index + 1}</span>
         <div style={{ display: "flex", gap: 14 }}>
           <CopyBtn text={text} />
           <button onClick={doSave} style={miniBtn(saved ? C.moss : C.faint)}>{saved ? "saved ★" : "save ☆"}</button>
@@ -571,16 +576,11 @@ function OfferCompare() {
   const removeOffer = (id) => setOffers((o) => (o.length > 2 ? o.filter((x) => x.id !== id) : o));
 
   // upload mode
-  const [be, setBe] = useState({ url: "", key: "" });
   const [files, setFiles] = useState([]);
   const [busy, setBusy] = useState(false);
   const [uErr, setUErr] = useState("");
   const [uOut, setUOut] = useState("");
-  const [savedFlash, setSavedFlash] = useState(false);
   const { add } = useContext(SavedCtx);
-
-  useEffect(() => { (async () => { if (STORE_OK) { try { const r = await window.storage.get("analyzer-backend"); if (r) setBe(JSON.parse(r.value)); } catch {} } })(); }, []);
-  const saveBe = async () => { if (STORE_OK) { try { await window.storage.set("analyzer-backend", JSON.stringify(be)); } catch {} } setSavedFlash(true); setTimeout(() => setSavedFlash(false), 1500); };
 
   const run = () => {
     const filled = offers.map((o) => o.text.trim()).filter(Boolean);
@@ -603,13 +603,13 @@ function OfferCompare() {
 
   const analyze = async () => {
     setUErr(""); setUOut("");
-    if (!be.url.trim()) return setUErr("Add your backend URL (ends in /api/analyze).");
     const usable = files.filter((f) => !f.scanned && f.text.length > 40);
     if (usable.length < 2) return setUErr("Need at least two readable PDFs. Scanned files can't be read yet.");
     setBusy(true);
     try {
-      const r = await fetch(be.url.trim(), { method: "POST", headers: { "Content-Type": "application/json", "x-app-key": be.key.trim() }, body: JSON.stringify({ offers: usable.map((f) => ({ name: f.name, text: f.text })), priorities }) });
+      const r = await fetch(API_ANALYZE, { method: "POST", headers: { "Content-Type": "application/json", "x-app-token": TOKEN }, body: JSON.stringify({ offers: usable.map((f) => ({ name: f.name, text: f.text })), priorities }) });
       const data = await r.json();
+      if (r.status === 401) { TOKEN = ""; try { await window.storage.delete("closeassist-token"); } catch {} window.dispatchEvent(new Event("closeassist-logout")); throw new Error("Session expired — please log in again."); }
       if (!r.ok) throw new Error(data.error || "Request failed.");
       setUOut(data.analysis);
     } catch (e) { setUErr(e.message); } finally { setBusy(false); }
@@ -622,7 +622,7 @@ function OfferCompare() {
 
     {mode === "paste" && (<div>
       <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "11px 14px", marginBottom: 18 }}>
-        <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Paste each offer's key terms. Runs on the in-app AI (concise output). To read full PDFs end-to-end, use Upload PDFs with your backend connected.</p>
+        <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Paste each offer's key terms. Runs on the in-app AI (concise output). To read full PDFs end-to-end, switch to Upload PDFs.</p>
       </div>
       {offers.map((o, i) => (
         <div key={o.id} style={{ marginBottom: 14 }}>
@@ -641,12 +641,7 @@ function OfferCompare() {
 
     {mode === "upload" && (<div>
       <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.amber}`, borderRadius: 2, padding: "11px 14px", marginBottom: 18 }}>
-        <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Reads full PDFs end-to-end through your own deployed backend. Text is extracted here in your browser; only text is sent to your server. Needs the backend from the deploy guide. Scanned PDFs are flagged and skipped (OCR is a later add).</p>
-      </div>
-      <div style={{ border: `1.5px solid ${C.line}`, borderRadius: 3, padding: 16, marginBottom: 16, background: "#fff" }}>
-        <Field label="Your backend URL"><input style={inputStyle} value={be.url} onChange={(e) => setBe({ ...be, url: e.target.value })} placeholder="https://your-app.vercel.app/api/analyze" /></Field>
-        <Field label="App key (your APP_SECRET)"><input style={inputStyle} type="password" value={be.key} onChange={(e) => setBe({ ...be, key: e.target.value })} placeholder="the secret you set in Vercel" /></Field>
-        <button onClick={saveBe} style={{ fontFamily: SAN, fontSize: 13, fontWeight: 700, color: C.cream, background: savedFlash ? C.moss : C.ink, border: "none", borderRadius: 3, padding: "9px 18px", cursor: "pointer" }}>{savedFlash ? "saved ✓" : "Save connection"}</button>
+        <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Reads full PDFs end-to-end. Text is extracted here in your browser; only text is sent to the server. Scanned PDFs are flagged and skipped (OCR is a later add).</p>
       </div>
       <label style={{ display: "block", border: `2px dashed ${C.line}`, borderRadius: 6, padding: 22, textAlign: "center", cursor: "pointer", color: C.faint, fontFamily: SAN, fontSize: 14, background: "#fff", marginBottom: 14 }}>
         Tap to choose offer PDFs (2–12)
@@ -698,7 +693,7 @@ function SignatureRequest() {
 }
 
 const GROUPS = [
-  { name: "Outreach & Follow-Up", tabs: [
+  { name: "Outreach & Follow-Up", color: "#c2581f", tabs: [
     { id: "follow", label: "Follow-Up Writer", sub: "Turn a lead's situation into messages worth replying to.", el: FollowUp },
     { id: "obj", label: "Objection Studio", sub: "Three confident ways to answer anything they throw at you.", el: Objection },
     { id: "warm", label: "Warm-Up Batch", sub: "Paste your cold database, get a tailored text for each.", el: Warmup },
@@ -706,7 +701,7 @@ const GROUPS = [
     { id: "vm", label: "Voicemail + Text", sub: "A matched voicemail script and follow-up text for cold outreach.", el: Voicemail },
     { id: "rev", label: "Review Request", sub: "Warm, easy-yes asks for a Google/Zillow review.", el: Review },
   ] },
-  { name: "Social Content", tabs: [
+  { name: "Social Content", color: "#2c6e72", tabs: [
     { id: "content", label: "Content Engine", sub: "A topic in, a week of posts out.", el: Content },
     { id: "engage", label: "Engagement Posts", sub: "“Text / comment / DM X to get Y” lead-magnet posts.", el: Engagement },
     { id: "mile", label: "Milestone Posts", sub: "Just Listed, Just Closed, Offer Accepted & New Listing.", el: Milestone },
@@ -715,13 +710,13 @@ const GROUPS = [
     { id: "market", label: "Market Update", sub: "Your local stats, turned into expert content.", el: MarketUpdate },
     { id: "news", label: "Email Newsletter", sub: "Your month's news, drafted into a clean send.", el: Newsletter },
   ] },
-  { name: "Listings & Appointments", tabs: [
+  { name: "Listings & Appointments", color: "#4a6b41", tabs: [
     { id: "listing", label: "Listing Writer", sub: "Property notes in, a description that sells out.", el: Listing },
     { id: "price", label: "Price Reduced", sub: "Reframe a price drop as opportunity, not desperation.", el: PriceReduced },
     { id: "open", label: "Open-House Script", sub: "A game plan for the door, walkthrough, and follow-up.", el: OpenHouse },
     { id: "prep", label: "Consult Prep", sub: "Talking points, questions & objections before you pitch.", el: ConsultPrep },
   ] },
-  { name: "Contracts & Signing", tabs: [
+  { name: "Contracts & Signing", color: "#7a4a63", tabs: [
     { id: "quick", label: "Quick Offer", sub: "Set your buyer once, then one offer per property — address + price.", el: QuickOffer },
     { id: "contract", label: "Contract Prep", sub: "Fill your terms into a clean draft with signature blocks ready for e-sign.", el: ContractPrep },
     { id: "compare", label: "Offer Compare", sub: "Paste competing offers — get them ranked with a pick to present.", el: OfferCompare },
@@ -802,30 +797,31 @@ function ProfileDrawer({ open, onClose }) {
   );
 }
 
-function BackendDrawer({ open, onClose, onChange }) {
-  const [url, setUrl] = useState(BACKEND.url);
-  const [key, setKey] = useState(BACKEND.key);
-  const [flash, setFlash] = useState(false);
-  useEffect(() => { (async () => { if (STORE_OK) { try { const r = await window.storage.get("closeassist-backend-conn"); if (r) { const v = JSON.parse(r.value); BACKEND.url = v.url || ""; BACKEND.key = v.key || ""; setUrl(BACKEND.url); setKey(BACKEND.key); onChange && onChange(); } } catch {} } })(); }, []);
-  if (!open) return null;
-  const save = async () => {
-    BACKEND.url = url.trim(); BACKEND.key = key.trim();
-    if (STORE_OK) { try { await window.storage.set("closeassist-backend-conn", JSON.stringify({ url: BACKEND.url, key: BACKEND.key })); } catch {} }
-    setFlash(true); onChange && onChange(); setTimeout(() => setFlash(false), 1500);
+function LoginScreen({ onSuccess }) {
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (!pw.trim()) return setErr("Enter the password.");
+    setBusy(true); setErr("");
+    try {
+      const r = await fetch(API_LOGIN, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pw }) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || "Login failed.");
+      TOKEN = data.token;
+      try { await window.storage.set("closeassist-token", data.token); } catch {}
+      onSuccess();
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", justifyContent: "flex-end" }}>
-      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(28,24,21,.4)" }} />
-      <div style={{ position: "relative", width: "min(440px, 94vw)", height: "100%", background: C.cream, borderLeft: `2px solid ${C.ink}`, overflowY: "auto", padding: "24px 22px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-          <span style={{ fontFamily: SER, fontWeight: 700, fontSize: 22, color: C.ink }}>Backend</span>
-          <button onClick={onClose} style={miniBtn(C.faint)}>close ✕</button>
-        </div>
-        <p style={{ fontFamily: SAN, fontSize: 13, color: C.faint, lineHeight: 1.5, marginTop: 0, marginBottom: 18 }}>This testing build runs every tool through YOUR server (and your Anthropic key) instead of Claude. Paste your generate endpoint and app key once.</p>
-        <Field label="Generate endpoint URL"><input style={inputStyle} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://your-app.vercel.app/api/generate" /></Field>
-        <Field label="App key (your APP_SECRET)"><input style={inputStyle} type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder="the secret you set in Vercel" /></Field>
-        <button onClick={save} style={{ fontFamily: SAN, fontSize: 14, fontWeight: 700, color: C.cream, background: flash ? C.moss : C.ink, border: "none", borderRadius: 3, padding: "10px 20px", cursor: "pointer" }}>{flash ? "saved ✓" : "Save connection"}</button>
-        <p style={{ fontFamily: SAN, fontSize: 11.5, color: C.faint, lineHeight: 1.5, marginTop: 16 }}>Note: every generation now bills to your Anthropic key. Endpoint ends in <b>/api/generate</b> (not /api/analyze).</p>
+    <div style={{ minHeight: "100vh", background: C.cream, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, backgroundImage: "radial-gradient(circle at 15% 20%, rgba(194,88,31,.07), transparent 42%), radial-gradient(circle at 85% 80%, rgba(44,110,114,.07), transparent 45%)" }}>
+      <div style={{ width: "min(380px, 100%)", background: C.paper, border: `2px solid ${C.ink}`, borderRadius: 6, padding: 30, boxShadow: `8px 8px 0 ${C.amber}` }}>
+        <div style={{ fontFamily: SER, fontWeight: 700, fontSize: 30, color: C.ink, letterSpacing: -0.5 }}>Close<span style={{ color: C.amber }}>Assist</span></div>
+        <p style={{ fontFamily: SER, fontStyle: "italic", fontSize: 15, color: C.faint, margin: "2px 0 22px" }}>your AI sales desk</p>
+        <label style={{ display: "block", fontFamily: SAN, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1.2, color: C.faint, marginBottom: 6 }}>Password</label>
+        <input style={inputStyle} type="password" value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="enter your access password" autoFocus />
+        {err && <p style={{ fontFamily: SAN, fontSize: 13, color: C.amberDeep, margin: "10px 0 0" }}>{err}</p>}
+        <button onClick={submit} disabled={busy} style={{ width: "100%", marginTop: 16, fontFamily: SAN, fontSize: 15, fontWeight: 700, color: C.cream, background: busy ? C.faint : C.amber, border: "none", borderRadius: 3, padding: "13px", cursor: busy ? "default" : "pointer" }}>{busy ? "checking…" : "Enter →"}</button>
       </div>
     </div>
   );
@@ -836,20 +832,29 @@ function App() {
   const [saved, setSaved] = useState([]);
   const [profile, setProfile] = useState({});
   const [drawer, setDrawer] = useState(null); // 'saved' | 'brand' | 'backend' | null
-  const [connTick, setConnTick] = useState(0);
-  const connected = !!BACKEND.url;
-  void connTick;
+  const [authed, setAuthed] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
   const styleRef = useRef(null);
   const meta = ALL.find((x) => x.id === tab);
   const Active = meta.el;
+  const accent = (GROUPS.find((g) => g.tabs.some((tb) => tb.id === tab)) || {}).color || C.amber;
   useEffect(() => { if (!styleRef.current) { const s = document.createElement("style"); s.textContent = FONTS + "@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}"; document.head.appendChild(s); styleRef.current = s; } }, []);
-  useEffect(() => { (async () => { if (STORE_OK) { try { const r = await window.storage.get("closeassist-backend-conn"); if (r) { const v = JSON.parse(r.value); BACKEND.url = v.url || ""; BACKEND.key = v.key || ""; setConnTick((n) => n + 1); } } catch {} } })(); }, []);
+  useEffect(() => { (async () => { if (STORE_OK) { try { const r = await window.storage.get("closeassist-token"); if (r && r.value) { TOKEN = r.value; setAuthed(true); } } catch {} } setAuthChecked(true); })(); }, []);
+  useEffect(() => {
+    const onLogout = () => { setAuthed(false); };
+    window.addEventListener("closeassist-logout", onLogout);
+    return () => window.removeEventListener("closeassist-logout", onLogout);
+  }, []);
+  const signOut = async () => { TOKEN = ""; try { await window.storage.delete("closeassist-token"); } catch {} setAuthed(false); };
   const add = (item) => setSaved((s) => [{ id: Date.now() + Math.random(), ...item }, ...s]);
   const remove = (id) => setSaved((s) => s.filter((x) => x.id !== id));
   const update = (id, patch) => setSaved((s) => s.map((x) => (x.id === id ? { ...x, ...patch } : x)));
   const hasBrand = Object.values(profile).some((v) => v && v.trim());
 
   const headBtn = (label, onClick, filled) => <button onClick={onClick} style={{ fontFamily: SAN, fontSize: 13, fontWeight: 700, color: filled ? C.cream : C.ink, background: filled ? C.ink : "transparent", border: `1.5px solid ${C.ink}`, borderRadius: 999, padding: "7px 15px", cursor: "pointer" }}>{label}</button>;
+
+  if (!authChecked) return <div style={{ minHeight: "100vh", background: C.cream }} />;
+  if (!authed) return <LoginScreen onSuccess={() => setAuthed(true)} />;
 
   return (
     <ProfileCtx.Provider value={{ profile, setProfile }}>
@@ -862,9 +867,9 @@ function App() {
                 <span style={{ fontFamily: SER, fontStyle: "italic", fontSize: 15, color: C.faint }}>your AI sales desk</span>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                {headBtn(connected ? "⚡ Backend ✓" : "⚡ Backend", () => setDrawer("backend"), connected)}
                 {headBtn(hasBrand ? "⚙ Brand ✓" : "⚙ Brand", () => setDrawer("brand"), hasBrand)}
                 {headBtn("★ Saved" + (saved.length ? " (" + saved.length + ")" : ""), () => setDrawer("saved"), false)}
+                {headBtn("Sign out", signOut, false)}
               </div>
             </div>
             <p style={{ fontFamily: SAN, fontSize: 13.5, color: C.faint, marginTop: 6, maxWidth: 540, lineHeight: 1.5 }}>Follow up faster, handle objections cleaner, post more often — without the blank-page grind.</p>
@@ -873,24 +878,25 @@ function App() {
           <div style={{ maxWidth: 820, margin: "0 auto", padding: "18px 28px 0" }}>
             {GROUPS.map((g) => (
               <div key={g.name} style={{ marginBottom: 14 }}>
-                <div style={{ fontFamily: SAN, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.6, color: C.faint, marginBottom: 7 }}>{g.name}</div>
+                <div style={{ fontFamily: SAN, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.6, color: g.color, marginBottom: 7, display: "flex", alignItems: "center", gap: 7 }}><span style={{ width: 9, height: 9, borderRadius: 999, background: g.color, display: "inline-block" }} />{g.name}</div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {g.tabs.map((x) => { const on = x.id === tab; return <button key={x.id} onClick={() => setTab(x.id)} style={{ fontFamily: SAN, fontSize: 13, fontWeight: 600, padding: "8px 13px", borderRadius: 999, cursor: "pointer", border: `1.5px solid ${on ? C.ink : C.line}`, background: on ? C.ink : "transparent", color: on ? C.cream : C.faint }}>{x.label}</button>; })}
+                  {g.tabs.map((x) => { const on = x.id === tab; return <button key={x.id} onClick={() => setTab(x.id)} style={{ fontFamily: SAN, fontSize: 13, fontWeight: 600, padding: "8px 13px", borderRadius: 999, cursor: "pointer", border: `1.5px solid ${on ? g.color : C.line}`, background: on ? g.color : "transparent", color: on ? "#fff" : C.faint }}>{x.label}</button>; })}
                 </div>
               </div>
             ))}
           </div>
 
-          <div style={{ maxWidth: 820, margin: "8px auto 0", padding: 28, background: C.paper, border: `1.5px solid ${C.ink}`, borderRadius: 2 }}>
-            <p style={{ fontFamily: SER, fontStyle: "italic", fontSize: 17, color: C.moss, marginTop: 0, marginBottom: 22 }}>{meta.sub}</p>
+          <AccentCtx.Provider value={accent}>
+          <div style={{ maxWidth: 820, margin: "8px auto 0", padding: 28, background: C.paper, border: `2px solid ${accent}`, borderRadius: 4 }}>
+            <p style={{ fontFamily: SER, fontStyle: "italic", fontSize: 17, color: accent, marginTop: 0, marginBottom: 22 }}>{meta.sub}</p>
             <Active />
           </div>
+          </AccentCtx.Provider>
 
           <p style={{ maxWidth: 820, margin: "18px auto 0", padding: "0 28px", fontFamily: SAN, fontSize: 11.5, color: C.faint, lineHeight: 1.5 }}>Drafts are AI-generated — read before you send, and follow your local real estate advertising, fair-housing & consent (e.g. TCPA) rules. Brand details and saved items last for this session only.</p>
         </div>
         <SavedDrawer open={drawer === "saved"} onClose={() => setDrawer(null)} />
         <ProfileDrawer open={drawer === "brand"} onClose={() => setDrawer(null)} />
-        <BackendDrawer open={drawer === "backend"} onClose={() => setDrawer(null)} onChange={() => setConnTick((n) => n + 1)} />
       </SavedCtx.Provider>
     </ProfileCtx.Provider>
   );
