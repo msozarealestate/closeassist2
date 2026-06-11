@@ -1,19 +1,12 @@
 // CloseAssist backend — offer analysis endpoint.
 // Receives already-extracted contract TEXT from the browser (small payloads),
 // asks Claude to compare and rank the offers, returns the analysis.
-//
-// PDF text extraction happens in the browser (see /public/index.html) so this
-// server stays tiny and cheap. Scanned PDFs (no embedded text) need OCR, which
-// is a later add — they're flagged by the client before they ever reach here.
 
 import Anthropic from "@anthropic-ai/sdk";
 import { verify } from "../lib/auth.js";
 
-// Allow longer runs for the model call.
 export const config = { maxDuration: 60 };
 
-// Default model. Confirm the current string at https://docs.claude.com/en/docs/about-claude/models
-// Cheaper option: set MODEL=claude-haiku-4-5-20251001 in your env to cut cost.
 const MODEL = process.env.MODEL || "claude-sonnet-4-6";
 
 const SYSTEM = `You are an expert listing-side real estate advisor helping an agent decide which offer to present to their SELLER client.
@@ -47,7 +40,6 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Use POST." });
 
-  // Optional shared secret so randoms can't burn your API key.
   const _secret = process.env.APP_SECRET;
   if (_secret) {
     const _key = req.headers["x-app-key"];
@@ -60,7 +52,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Vercel parses JSON bodies automatically; guard just in case.
     const data = typeof req.body === "string" ? JSON.parse(req.body) : (req.body || {});
     const { offers, priorities } = data;
 
@@ -81,7 +72,6 @@ export default async function handler(req, res) {
     }
     if (usable.length > 12) return res.status(400).json({ error: "Max 12 offers per batch." });
 
-    // Cap each contract's text so a giant doc can't blow up token cost.
     const body =
       (priorities ? `What the client cares about most: ${priorities}\n\n` : "") +
       usable.map((o) => `OFFER ${o.label} (${o.name}):\n${o.text.slice(0, 16000)}`).join("\n\n----\n\n");
