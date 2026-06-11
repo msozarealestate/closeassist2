@@ -1,0 +1,11 @@
+{
+  "name": "closeassist-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "CloseAssist backend — contract upload + offer analysis via Claude",
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1"
+  }
+}

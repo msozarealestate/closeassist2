@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CloseAssist — Offer Analyzer</title>
+<style>
+  :root { --ink:#1c1815; --cream:#f4ede1; --paper:#fbf7ef; --amber:#c2581f; --moss:#3d4a3a; --line:#d8cdba; --faint:#8a7d6a; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--cream);color:var(--ink);font-family:'Hanken Grotesk',system-ui,sans-serif}
+  .wrap{max-width:780px;margin:0 auto;padding:28px 22px 80px}
+  h1{font-family:Georgia,'Times New Roman',serif;font-weight:800;font-size:30px;margin:0}
+  h1 span{color:var(--amber)}
+  .sub{color:var(--faint);font-size:14px;margin:6px 0 22px}
+  .card{background:var(--paper);border:1.5px solid var(--ink);border-radius:4px;padding:22px;margin-top:18px}
+  label{display:block;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:1.2px;color:var(--faint);margin:0 0 7px}
+  input[type=text],input[type=password]{width:100%;font-size:15px;padding:11px 13px;border:1.5px solid var(--line);border-radius:4px;background:#fff;color:var(--ink)}
+  .drop{border:2px dashed var(--line);border-radius:6px;padding:26px;text-align:center;color:var(--faint);cursor:pointer;background:#fff}
+  .drop.drag{border-color:var(--amber);color:var(--amber)}
+  .files{margin:14px 0 0;display:grid;gap:8px}
+  .file{display:flex;justify-content:space-between;align-items:center;font-size:14px;background:#fff;border:1.5px solid var(--line);border-left:4px solid var(--moss);border-radius:3px;padding:9px 12px}
+  .file.warn{border-left-color:var(--amber)}
+  .file small{color:var(--faint)}
+  button{font-family:inherit;font-size:15px;font-weight:700;color:#fff;background:var(--amber);border:none;border-radius:4px;padding:13px 24px;cursor:pointer;box-shadow:4px 4px 0 var(--ink)}
+  button:disabled{background:var(--faint);box-shadow:none;cursor:default}
+  .out{white-space:pre-wrap;font-size:15px;line-height:1.55}
+  .x{background:none;border:none;color:var(--faint);box-shadow:none;font-weight:600;cursor:pointer;padding:0;font-size:13px}
+  .err{color:#9c4316;font-size:14px;margin-top:10px}
+  .note{font-size:11.5px;color:var(--faint);line-height:1.5;margin-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Close<span>Assist</span> — Offer Analyzer</h1>
+  <p class="sub">Upload competing offers (PDF). Text is read in your browser; only the text is sent to your server to analyze.</p>
+
+  <div class="card">
+    <label>Backend URL</label>
+    <input id="url" type="text" placeholder="https://your-app.vercel.app/api/analyze" />
+    <div style="height:14px"></div>
+    <label>App key (the APP_SECRET you set)</label>
+    <input id="key" type="password" placeholder="your shared secret" />
+  </div>
+
+  <div class="card">
+    <label>Offers</label>
+    <div id="drop" class="drop">Tap to choose PDFs, or drag them here (2–12 files)</div>
+    <input id="file" type="file" accept="application/pdf" multiple hidden />
+    <div id="files" class="files"></div>
+    <div style="height:16px"></div>
+    <label>What does your client care about most? (optional)</label>
+    <input id="prio" type="text" placeholder="Max net proceeds · fastest clean close · certainty over top dollar" />
+    <div style="height:18px"></div>
+    <button id="go" disabled>Compare &amp; recommend →</button>
+    <div id="err" class="err"></div>
+    <p class="note">Scanned PDFs (no embedded text) can't be read yet and are flagged below — for those, upload them in a Claude chat. This analysis informs your judgment; verify every term against the actual documents. Not legal or financial advice.</p>
+  </div>
+
+  <div id="result" class="card" style="display:none">
+    <label>Analysis</label>
+    <div id="out" class="out"></div>
+  </div>
+</div>
+
+<script type="module">
+import * as pdfjs from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136/pdf.min.mjs";
+pdfjs.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136/pdf.worker.min.mjs";
+
+const el = (id) => document.getElementById(id);
+let offers = []; // {name, text, scanned}
+
+async function extract(file) {
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjs.getDocument({ data: buf }).promise;
+  let text = "";
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    text += content.items.map((i) => i.str).join(" ") + "\n";
+  }
+  return text.trim();
+}
+
+function render() {
+  const c = el("files");
+  c.innerHTML = "";
+  offers.forEach((o, i) => {
+    const div = document.createElement("div");
+    div.className = "file" + (o.scanned ? " warn" : "");
+    div.innerHTML = `<span>${o.name} ${o.scanned ? "<small>— no text found (scanned?)</small>" : `<small>— ${o.text.length.toLocaleString()} chars</small>`}</span>`;
+    const x = document.createElement("button");
+    x.className = "x"; x.textContent = "remove";
+    x.onclick = () => { offers.splice(i, 1); render(); };
+    div.appendChild(x);
+    c.appendChild(div);
+  });
+  const ready = offers.filter((o) => !o.scanned).length >= 2;
+  el("go").disabled = !ready;
+}
+
+async function addFiles(list) {
+  for (const file of list) {
+    if (file.type !== "application/pdf") continue;
+    try {
+      const text = await extract(file);
+      offers.push({ name: file.name, text, scanned: text.length < 40 });
+    } catch {
+      offers.push({ name: file.name, text: "", scanned: true });
+    }
+  }
+  render();
+}
+
+el("drop").onclick = () => el("file").click();
+el("file").onchange = (e) => addFiles(e.target.files);
+const drop = el("drop");
+["dragover","dragenter"].forEach(ev => drop.addEventListener(ev, (e)=>{e.preventDefault();drop.classList.add("drag");}));
+["dragleave","drop"].forEach(ev => drop.addEventListener(ev, (e)=>{e.preventDefault();drop.classList.remove("drag");}));
+drop.addEventListener("drop", (e)=> addFiles(e.dataTransfer.files));
+
+el("go").onclick = async () => {
+  el("err").textContent = "";
+  const url = el("url").value.trim();
+  if (!url) { el("err").textContent = "Enter your backend URL."; return; }
+  const payload = {
+    offers: offers.filter((o)=>!o.scanned).map((o)=>({ name:o.name, text:o.text })),
+    priorities: el("prio").value.trim(),
+  };
+  el("go").disabled = true; el("go").textContent = "Analyzing…";
+  try {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type":"application/json", "x-app-key": el("key").value.trim() },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || "Request failed");
+    el("result").style.display = "block";
+    el("out").textContent = data.analysis;
+  } catch (e) {
+    el("err").textContent = e.message;
+  } finally {
+    el("go").disabled = false; el("go").textContent = "Compare & recommend →";
+  }
+};
+</script>
+</body>
+</html>
