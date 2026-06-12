@@ -382,6 +382,49 @@ function Newsletter() {
 }
 
 // ============ LISTINGS & APPOINTMENTS ============
+function CMABuilder() {
+  const [side, setSide] = useState("Seller (pricing a listing)");
+  const [subject, setSubject] = useState("");
+  const [comps, setComps] = useState("");
+  const [goal, setGoal] = useState("Balanced (market value)");
+  const t = useTool();
+
+  const run = () => {
+    if (!subject.trim()) return t.setError("Add the subject property details first.");
+    if (comps.trim().length < 20) return t.setError("Paste at least a couple of comparable sales (address, sold price, beds/baths, sqft, sale date).");
+    const facts =
+      "ANALYSIS TYPE: " + side + "\n" +
+      "PRICING GOAL: " + goal + "\n\n" +
+      "SUBJECT PROPERTY:\n" + subject + "\n\n" +
+      "COMPARABLE SALES (provided by the agent from the MLS):\n" + comps;
+    t.generate(CMA_SYSTEM, facts);
+  };
+
+  return (<div>
+    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "11px 14px", marginBottom: 18 }}>
+      <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>You bring the comps from your MLS (that keeps it accurate and within your MLS rules) — CloseAssist does the comparison, a suggested price range, strategy, and a client-ready writeup. Not an appraisal; your professional judgment decides the number.</p>
+    </div>
+
+    <Field label="Analysis for"><Chips options={["Seller (pricing a listing)", "Buyer (is this price justified?)"]} value={side} onChange={setSide} /></Field>
+
+    <Field label="Subject property">
+      <textarea style={{ ...inputStyle, minHeight: 90 }} value={subject} onChange={(e) => setSubject(e.target.value)} placeholder={"123 Oak St, Naperville IL 60540\n4 bed / 2.5 bath, 2,400 sqft, built 1998\nUpdated kitchen, new roof 2022, finished basement, 2-car garage\nCondition: very good. Corner lot."} />
+    </Field>
+
+    <Field label="Comparable sales (paste from your MLS — one per line or block)">
+      <textarea style={{ ...inputStyle, minHeight: 130 }} value={comps} onChange={(e) => setComps(e.target.value)} placeholder={"131 Oak St — sold $615,000 — 4/2.5 — 2,380 sqft — sold 04/2026 — similar, no basement finish\n88 Maple Ave — sold $640,000 — 4/3 — 2,520 sqft — sold 03/2026 — updated, larger lot\n210 Elm Ct — sold $598,000 — 3/2.5 — 2,200 sqft — sold 05/2026 — dated kitchen"} />
+    </Field>
+
+    <Field label="Pricing goal"><Chips options={["Price to sell fast", "Balanced (market value)", "List high / test the market"]} value={goal} onChange={setGoal} /></Field>
+
+    <div style={{ height: 6 }} />
+    <RunButton onClick={run} loading={t.loading}>Build the CMA →</RunButton>
+    <div style={{ marginTop: 22 }}><Results {...t} noun="CMA" onRefine={t.refine} /></div>
+  </div>);
+}
+
+const CMA_SYSTEM = "You are an expert real estate pricing analyst helping a licensed agent prepare a Comparative Market Analysis (CMA). The agent provides the subject property and a set of comparable sales they pulled from the MLS. Use ONLY the comps and details provided — never invent comps, prices, or market data you were not given. Produce ONE clear document with these sections:\n\n=== 1. COMP COMPARISON ===\nA tidy side-by-side of the subject vs each comp (price, beds/baths, sqft, sale date, condition/notes). Point out in plain English how each comp differs from the subject and which direction that pushes value (e.g., 'larger lot — adjust subject up', 'no finished basement — adjust down'). Do NOT fabricate exact dollar adjustments unless the math clearly follows from the data; describe direction and rough magnitude instead.\n\n=== 2. SUGGESTED PRICE RANGE ===\nGive a recommended range and a single suggested figure, with the reasoning tied to the comps. Note the price-per-sqft picture if sqft is provided. Be honest about uncertainty when comps are thin or inconsistent.\n\n=== 3. PRICING STRATEGY ===\nTie the recommendation to the agent's stated pricing goal (sell fast / balanced / list high). Explain the tradeoffs of the chosen approach and what to watch (days on market, appraisal risk if listing high, etc.). For a buyer-side analysis, instead advise whether the target price is supported and how aggressive an offer the comps justify.\n\n=== 4. CLIENT-READY SUMMARY ===\nA warm, clear narrative the agent can put straight into a listing presentation or send to the client — what the home is worth and why, in everyday language, confident but not pushy.\n\nRules: Use only provided data. This analysis informs the agent's judgment and is NOT a formal appraisal; the agent sets the final price. Keep it tight and usable. Separate sections with the === headers exactly as shown and use no other === separators.";
+
 function Listing() {
   const [details, setDetails] = useState(""); const [style, setStyle] = useState("Polished"); const [length, setLength] = useState("Standard"); const t = useTool();
   const run = () => { if (!details.trim()) return t.setError("Give me the property details to work from.");
@@ -433,6 +476,150 @@ function ConsultPrep() {
     <div style={{ height: 6 }} />
     <RunButton onClick={run} loading={t.loading}>Prep me →</RunButton>
     <div style={{ marginTop: 22 }}><Results {...t} noun="part" onRefine={t.refine} /></div>
+  </div>);
+}
+
+function CommissionStatement() {
+  const { profile } = useContext(ProfileCtx);
+  const [f, setF] = useState({
+    brokerage: "", address: "", listingBroker: "", buyerBroker: "",
+    price: "", pct: "", buyerBrokerComm: "",
+    adminFeeBuyer: "", commPaidBySeller: "", commDueBuyingBroker: "",
+    feeToSellersAgent: "", officeAdmissionFee: "",
+  });
+  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  const [copied, setCopied] = useState(false);
+
+  const num = (v) => { const n = Number(String(v).replace(/[^0-9.]/g, "")); return isFinite(n) ? n : 0; };
+  const has = (v) => String(v).trim() !== "";
+  const money = (n) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+
+  // Auto-calc where possible, but let a typed value override.
+  const calcBuyerBroker = has(f.buyerBrokerComm) ? num(f.buyerBrokerComm) : (has(f.price) && has(f.pct) ? num(f.price) * num(f.pct) / 100 : 0);
+  const commDue = has(f.commDueBuyingBroker) ? num(f.commDueBuyingBroker) : (has(f.commPaidBySeller) ? num(f.commPaidBySeller) : calcBuyerBroker);
+  const netToBuyingBroker = commDue - num(f.feeToSellersAgent);
+  const totalDueFromBuyer = num(f.adminFeeBuyer) + num(f.officeAdmissionFee);
+
+  const brandSuggest = (profile && (profile.brokerage || profile.team || profile.name)) || "";
+  const brokerName = (f.brokerage && f.brokerage.trim()) ? f.brokerage.trim() : (brandSuggest || "[Your Brokerage]");
+
+  const line = (label, val) => has(val) || val === 0 ? label + ": " + (typeof val === "number" ? money(val) : val) : null;
+
+  const buildText = () => {
+    const L = [];
+    L.push(brokerName.toUpperCase());
+    L.push("Commission Statement");
+    L.push("");
+    if (has(f.address)) L.push("Property Address: " + f.address);
+    if (has(f.listingBroker)) L.push("Listing Broker: " + f.listingBroker);
+    if (has(f.buyerBroker)) L.push("Buyer Broker: " + f.buyerBroker);
+    L.push("");
+    if (has(f.price)) L.push("Purchase Price: " + money(num(f.price)));
+    if (has(f.pct)) L.push("Percentage: " + num(f.pct) + "%");
+    if (calcBuyerBroker) L.push("Buyer Broker: " + money(calcBuyerBroker));
+    if (has(f.adminFeeBuyer)) L.push("Administrative Transaction Fee Charged to Buyer: " + money(num(f.adminFeeBuyer)));
+    if (has(f.commPaidBySeller)) L.push("Commission Paid by Seller: " + money(num(f.commPaidBySeller)));
+    if (commDue) L.push("Commission Due to Buying Broker: " + money(commDue));
+    if (has(f.feeToSellersAgent)) L.push("Fee to Seller's Agent (deducted from commission): " + money(num(f.feeToSellersAgent)));
+    if (commDue) L.push("Net Commission to Buying Broker: " + money(netToBuyingBroker));
+    if (has(f.officeAdmissionFee)) L.push("Broker Office Admission Fee Charged to Buyer: " + money(num(f.officeAdmissionFee)));
+    L.push("Total Due from Buyer to Buying Broker: " + money(totalDueFromBuyer));
+    L.push("");
+    L.push("INSTRUCTIONS FOR SETTLEMENT AGENT — Payable to:");
+    if (netToBuyingBroker) L.push("  " + (f.buyerBroker || brokerName) + " (Buying Broker) — net commission paid by SELLER to the buying broker: " + money(netToBuyingBroker));
+    if (has(f.feeToSellersAgent)) L.push("  " + (f.listingBroker || "Seller's Agent") + " (Seller's Agent) — fee deducted from buying broker's commission: " + money(num(f.feeToSellersAgent)));
+    if (has(f.officeAdmissionFee)) L.push("  " + (f.buyerBroker || brokerName) + " (Broker Office Admission Fee) — please issue a check for the broker office admission fee: " + money(num(f.officeAdmissionFee)));
+    L.push("Total Due from Buyer to Buying Broker: " + money(totalDueFromBuyer));
+    L.push("");
+    L.push("Prepared by " + brokerName);
+    return L.join("\n");
+  };
+
+  const copy = async () => { try { await navigator.clipboard.writeText(buildText()); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch {} };
+  const email = () => { window.location.href = "mailto:?subject=" + encodeURIComponent("Commission Statement — " + (f.address || "")) + "&body=" + encodeURIComponent(buildText()); };
+  const csv = () => {
+    const rows = [["Field", "Value"],
+      ["Property Address", f.address], ["Listing Broker", f.listingBroker], ["Buyer Broker", f.buyerBroker],
+      ["Purchase Price", has(f.price) ? money(num(f.price)) : ""], ["Percentage", has(f.pct) ? num(f.pct) + "%" : ""],
+      ["Buyer Broker Commission", calcBuyerBroker ? money(calcBuyerBroker) : ""],
+      ["Admin Transaction Fee (Buyer)", has(f.adminFeeBuyer) ? money(num(f.adminFeeBuyer)) : ""],
+      ["Commission Paid by Seller", has(f.commPaidBySeller) ? money(num(f.commPaidBySeller)) : ""],
+      ["Commission Due to Buying Broker", commDue ? money(commDue) : ""],
+      ["Fee to Seller's Agent", has(f.feeToSellersAgent) ? money(num(f.feeToSellersAgent)) : ""],
+      ["Net Commission to Buying Broker", commDue ? money(netToBuyingBroker) : ""],
+      ["Broker Office Admission Fee (Buyer)", has(f.officeAdmissionFee) ? money(num(f.officeAdmissionFee)) : ""],
+      ["Total Due from Buyer to Buying Broker", money(totalDueFromBuyer)],
+      ["Prepared by", brokerName]];
+    const esc = (v) => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
+    const blob = new Blob([rows.map((r) => r.map(esc).join(",")).join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob); const a = document.createElement("a");
+    const slug = (f.address || "commission").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "commission";
+    a.href = url; a.download = "commission-" + slug + ".csv"; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const half = { flex: "1 1 150px" };
+  const moneyInput = (label, key, ph) => <div style={half}><Field label={label}><input style={inputStyle} value={f[key]} onChange={(e) => set(key, e.target.value)} placeholder={ph} /></Field></div>;
+  const row = (label, val, bold) => <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "5px 0", borderBottom: `1px solid ${C.line}` }}><span style={{ fontFamily: SAN, fontSize: 13.5, color: C.ink, fontWeight: bold ? 700 : 400 }}>{label}</span><span style={{ fontFamily: SAN, fontSize: 13.5, color: C.ink, fontWeight: bold ? 700 : 600 }}>{val}</span></div>;
+
+  return (<div>
+    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "11px 14px", marginBottom: 18 }}>
+      <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Fill in whatever applies — leave the rest blank. Buyer Broker, Net Commission, and the totals calculate automatically. "Prepared by" uses your Brand brokerage.</p>
+    </div>
+
+    <Field label="Your brokerage (shown on the statement)"><input style={inputStyle} value={f.brokerage} onChange={(e) => set("brokerage", e.target.value)} placeholder={brandSuggest || "e.g. Smart Home Realty"} /></Field>
+    <Field label="Property address"><input style={inputStyle} value={f.address} onChange={(e) => set("address", e.target.value)} placeholder="9911 S Peoria St, Chicago IL 60643" /></Field>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      {moneyInput("Listing Broker", "listingBroker", "Real People Realty")}
+      {moneyInput("Buyer Broker", "buyerBroker", "Smart Home Realty")}
+    </div>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      {moneyInput("Purchase Price", "price", "$160,000")}
+      {moneyInput("Percentage (%)", "pct", "2.5")}
+    </div>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      {moneyInput("Buyer Broker $ (auto if blank)", "buyerBrokerComm", "leave blank to auto-calc")}
+      {moneyInput("Admin Transaction Fee (Buyer)", "adminFeeBuyer", "$500")}
+    </div>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      {moneyInput("Commission Paid by Seller", "commPaidBySeller", "$4,000")}
+      {moneyInput("Commission Due to Buying Broker", "commDueBuyingBroker", "auto if blank")}
+    </div>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      {moneyInput("Fee to Seller's Agent", "feeToSellersAgent", "$299")}
+      {moneyInput("Broker Office Admission Fee (Buyer)", "officeAdmissionFee", "$500")}
+    </div>
+
+    <div style={{ marginTop: 20, border: `2px solid ${C.ink}`, borderRadius: 5, overflow: "hidden" }}>
+      <div style={{ background: C.ink, color: "#fff", padding: "12px 16px", textAlign: "center" }}>
+        <div style={{ fontFamily: SER, fontWeight: 700, fontSize: 20, letterSpacing: 0.5 }}>{brokerName}</div>
+        <div style={{ fontFamily: SAN, fontSize: 13, fontWeight: 600 }}>Commission Statement</div>
+      </div>
+      <div style={{ padding: 16 }}>
+        {(has(f.address) || has(f.listingBroker) || has(f.buyerBroker)) && <div style={{ marginBottom: 12, fontFamily: SAN, fontSize: 13, color: C.ink, lineHeight: 1.7 }}>
+          {has(f.address) && <div><b>Property Address:</b> {f.address}</div>}
+          {has(f.listingBroker) && <div><b>Listing Broker:</b> {f.listingBroker}</div>}
+          {has(f.buyerBroker) && <div><b>Buyer Broker:</b> {f.buyerBroker}</div>}
+        </div>}
+        {has(f.price) && row("Purchase Price", money(num(f.price)))}
+        {has(f.pct) && row("Percentage", num(f.pct) + "%")}
+        {!!calcBuyerBroker && row("Buyer Broker", money(calcBuyerBroker))}
+        {has(f.adminFeeBuyer) && row("Administrative Transaction Fee Charged to Buyer", money(num(f.adminFeeBuyer)))}
+        {has(f.commPaidBySeller) && row("Commission Paid by Seller", money(num(f.commPaidBySeller)), true)}
+        {!!commDue && row("Commission Due to Buying Broker", money(commDue), true)}
+        {has(f.feeToSellersAgent) && row("Fee to Seller's Agent (deducted from commission)", money(num(f.feeToSellersAgent)))}
+        {!!commDue && row("Net Commission to Buying Broker", money(netToBuyingBroker), true)}
+        {has(f.officeAdmissionFee) && row("Broker Office Admission Fee Charged to Buyer", money(num(f.officeAdmissionFee)))}
+        {row("Total Due from Buyer to Buying Broker", money(totalDueFromBuyer), true)}
+        <div style={{ marginTop: 14, textAlign: "center", fontFamily: SAN, fontSize: 12.5, color: C.faint }}>Prepared by {brokerName}</div>
+      </div>
+    </div>
+
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+      <button onClick={copy} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: copied ? "#fff" : C.ink, background: copied ? C.moss : "transparent", border: `1.5px solid ${copied ? C.moss : C.ink}`, borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>{copied ? "Copied ✓" : "Copy statement"}</button>
+      <button onClick={csv} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: C.ink, background: "transparent", border: `1.5px solid ${C.ink}`, borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Download CSV</button>
+      <button onClick={email} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: C.ink, background: "transparent", border: `1.5px solid ${C.ink}`, borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Email it</button>
+    </div>
   </div>);
 }
 
@@ -533,11 +720,101 @@ function OfferBuilder() {
     <div style={{ height: 6 }} />
     <RunButton onClick={run} loading={t.loading}>Build the offer →</RunButton>
     <div style={{ marginTop: 22 }}><Results {...t} noun="offer package" onRefine={t.refine} /></div>
-    <SendToFub deal={d} side={side} />
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-start", marginTop: 18 }}>
+      <CopyDealData deal={d} side={side} />
+      <SendToFub deal={d} side={side} inline />
+    </div>
   </div>);
 }
 
-function SendToFub({ deal, side }) {
+function dealToText(deal, side) {
+  const L = [];
+  L.push("DEAL SHEET — via CloseAssist");
+  L.push("Side: " + side);
+  L.push("");
+  if (deal.buyers) L.push("Buyer(s): " + deal.buyers);
+  if (deal.sellers) L.push("Seller(s): " + deal.sellers);
+  L.push("Property: " + (deal.address || "[none]"));
+  if (deal.mls) L.push("MLS #: " + deal.mls);
+  if (deal.list) L.push("List price: " + deal.list);
+  L.push("Offer price: " + (deal.offer || "[none]"));
+  if (deal.earnest) L.push("Earnest money: " + deal.earnest + " (due " + deal.earnestDays + " business days after acceptance)");
+  if (deal.credit) L.push("Seller credit at closing: " + deal.credit);
+  if (deal.buyerComp) L.push("Seller pays buyer-broker comp (Para 4): " + deal.buyerComp);
+  L.push("Financing: " + deal.financing);
+  if (deal.close) L.push("Closing date: " + deal.close);
+  L.push("Possession: " + deal.possession);
+  L.push("Inspection election (Para 15): " + deal.inspection);
+  L.push("Appraisal Addendum: " + deal.apprAddendum);
+  L.push("Home-sale contingency (Para 31): " + deal.homeSale);
+  if (deal.extra) L.push("Other terms: " + deal.extra);
+  return L.join("\n");
+}
+
+function dealToCSV(deal, side) {
+  const rows = [
+    ["Field", "Value"],
+    ["Side", side],
+    ["Buyers", deal.buyers],
+    ["Sellers", deal.sellers],
+    ["Property", deal.address],
+    ["MLS #", deal.mls],
+    ["List price", deal.list],
+    ["Offer price", deal.offer],
+    ["Earnest money", deal.earnest],
+    ["EM due (biz days)", deal.earnestDays],
+    ["Seller credit", deal.credit],
+    ["Seller pays buyer comp (Para 4)", deal.buyerComp],
+    ["Financing", deal.financing],
+    ["Closing date", deal.close],
+    ["Possession", deal.possession],
+    ["Inspection election (Para 15)", deal.inspection],
+    ["Appraisal Addendum", deal.apprAddendum],
+    ["Home-sale contingency (Para 31)", deal.homeSale],
+    ["Other terms", deal.extra],
+  ];
+  const esc = (v) => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
+  return rows.map((r) => r.map(esc).join(",")).join("\n");
+}
+
+function CopyDealData({ deal, side }) {
+  const [copied, setCopied] = useState(false);
+  const btn = (active) => ({ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: active ? "#fff" : C.ink, background: active ? C.moss : "transparent", border: `1.5px solid ${active ? C.moss : C.ink}`, borderRadius: 3, padding: "11px 16px", cursor: "pointer" });
+
+  const copy = async () => {
+    const text = dealToText(deal, side);
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text);
+      else { const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); }
+      setCopied(true); setTimeout(() => setCopied(false), 1800);
+    } catch { setCopied(false); }
+  };
+
+  const downloadCSV = () => {
+    const csv = dealToCSV(deal, side);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const slug = (deal.address || "deal").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "deal";
+    a.href = url; a.download = "closeassist-" + slug + ".csv";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const email = () => {
+    const subject = "Deal: " + (deal.address || "New offer");
+    const body = dealToText(deal, side);
+    window.location.href = "mailto:?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
+  };
+
+  return (<>
+    <button onClick={copy} style={btn(copied)}>{copied ? "Copied ✓" : "Copy deal data"}</button>
+    <button onClick={downloadCSV} style={btn(false)}>Download CSV</button>
+    <button onClick={email} style={btn(false)}>Email it</button>
+  </>);
+}
+
+function SendToFub({ deal, side, inline }) {
   const [open, setOpen] = useState(false);
   const [stages, setStages] = useState(null);   // null = not loaded, [] = loaded none
   const [stageId, setStageId] = useState("");
@@ -594,11 +871,11 @@ function SendToFub({ deal, side }) {
   };
 
   if (!open) {
-    return <button onClick={openPanel} style={{ marginTop: 18, fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: "#fff", background: C.moss, border: "none", borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Send to Follow Up Boss →</button>;
+    return <button onClick={openPanel} style={{ marginTop: inline ? 0 : 18, fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: "#fff", background: C.moss, border: "none", borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Send to Follow Up Boss →</button>;
   }
 
   return (
-    <div style={{ marginTop: 20, border: `1.5px solid ${C.moss}`, borderRadius: 5, padding: 16, background: "#fff" }}>
+    <div style={{ marginTop: 20, width: "100%", flexBasis: "100%", border: `1.5px solid ${C.moss}`, borderRadius: 5, padding: 16, background: "#fff" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
         <span style={{ fontFamily: SER, fontWeight: 700, fontSize: 17, color: C.ink }}>Send to Follow Up Boss</span>
         <button onClick={() => setOpen(false)} style={{ fontFamily: SAN, fontSize: 12, color: C.faint, background: "none", border: "none", cursor: "pointer" }}>close ✕</button>
@@ -906,6 +1183,7 @@ const GROUPS = [
   ] },
   { name: "Listings & Appointments", color: "#2c5d8a", tabs: [
     { id: "listing", label: "Listing Writer", sub: "Property notes in, a description that sells out.", el: Listing },
+    { id: "cma", label: "CMA Builder", sub: "Bring your comps — get the analysis, a price range & a client-ready writeup.", el: CMABuilder },
     { id: "price", label: "Price Reduced", sub: "Reframe a price drop as opportunity, not desperation.", el: PriceReduced },
     { id: "open", label: "Open-House Script", sub: "A game plan for the door, walkthrough, and follow-up.", el: OpenHouse },
     { id: "prep", label: "Consult Prep", sub: "Talking points, questions & objections before you pitch.", el: ConsultPrep },
@@ -916,6 +1194,7 @@ const GROUPS = [
     { id: "contract", label: "Contract Prep", sub: "Fill your terms into a clean draft with signature blocks ready for e-sign.", el: ContractPrep },
     { id: "compare", label: "Offer Compare", sub: "Paste competing offers — get them ranked with a pick to present.", el: OfferCompare },
     { id: "sign", label: "Signature Request", sub: "The message that goes out with your e-signature envelope.", el: SignatureRequest },
+    { id: "commission", label: "Commission Statement", sub: "Punch in the numbers — get your commission statement, totaled and ready to send.", el: CommissionStatement },
   ] },
 ];
 const ALL = GROUPS.flatMap((g) => g.tabs);
