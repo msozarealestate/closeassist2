@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>What's My Home Worth?</title>
+<style>
+  :root { --ink:#16243a; --paper:#f4f6f8; --line:#d9dee5; --accent:#c0392b; --moss:#1f3a5f; --faint:#697586; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--ink); }
+  .wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
+          background-image: radial-gradient(circle at 12% 15%, rgba(192,57,43,.06), transparent 42%), radial-gradient(circle at 88% 85%, rgba(31,58,95,.06), transparent 45%); }
+  .card { width: min(440px, 100%); background: var(--paper); border: 2px solid var(--ink); border-radius: 8px; padding: 30px; box-shadow: 8px 8px 0 var(--accent); }
+  h1 { font-family: Georgia, "Times New Roman", serif; font-size: 27px; margin: 0 0 6px; line-height: 1.15; }
+  .accent { color: var(--accent); }
+  p.sub { font-family: Georgia, serif; font-style: italic; color: var(--faint); margin: 0 0 22px; font-size: 15px; }
+  label { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--faint); margin: 14px 0 5px; }
+  input { width: 100%; font-size: 16px; color: var(--ink); background: #fff; border: 1.5px solid var(--line); border-radius: 3px; padding: 12px 13px; outline: none; }
+  input:focus { border-color: var(--moss); }
+  button { width: 100%; margin-top: 22px; font-size: 16px; font-weight: 700; color: #fff; background: var(--accent); border: none; border-radius: 4px; padding: 14px; cursor: pointer; }
+  button:disabled { background: var(--faint); cursor: default; }
+  .agent { text-align: center; font-size: 12.5px; color: var(--faint); margin-top: 16px; }
+  .msg { font-size: 14px; margin-top: 12px; }
+  .err { color: var(--accent); }
+  .ok { text-align: center; padding: 10px 0; }
+  .ok h2 { font-family: Georgia, serif; }
+  .fine { font-size: 11px; color: var(--faint); margin-top: 14px; line-height: 1.5; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card" id="card">
+    <h1 id="headline">What's Your Home <span class="accent">Worth?</span></h1>
+    <p class="sub" id="subhead">Get a free, no-obligation home value estimate. I'll personally review your property and send you a real number — not a generic guess.</p>
+
+    <div id="form">
+      <label>Your name</label>
+      <input id="name" placeholder="First & last name" autocomplete="name" />
+      <label>Email</label>
+      <input id="email" type="email" placeholder="you@email.com" autocomplete="email" />
+      <label>Phone</label>
+      <input id="phone" type="tel" placeholder="(555) 123-4567" autocomplete="tel" />
+      <label>Property address</label>
+      <input id="address" placeholder="123 Oak St, City, State" autocomplete="street-address" />
+      <div class="msg err" id="err"></div>
+      <button id="submit" onclick="send()">Get my home value →</button>
+      <div class="agent" id="agent"></div>
+      <div class="fine">By submitting, you agree to be contacted about your home's value. No spam.</div>
+    </div>
+
+    <div class="ok" id="done" style="display:none">
+      <h2>Thank you! 🎉</h2>
+      <p id="doneMsg">Your request is in. I'll review your property and reach out shortly with your home value estimate.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Customize via URL: ?agent=Miguel%20Soza&headline=...&sub=...&type=Seller%20Inquiry
+  var q = new URLSearchParams(location.search);
+  if (q.get("headline")) document.getElementById("headline").textContent = q.get("headline");
+  if (q.get("sub")) document.getElementById("subhead").textContent = q.get("sub");
+  if (q.get("agent")) document.getElementById("agent").textContent = "Presented by " + q.get("agent");
+
+  function send() {
+    var name = document.getElementById("name").value.trim();
+    var email = document.getElementById("email").value.trim();
+    var phone = document.getElementById("phone").value.trim();
+    var address = document.getElementById("address").value.trim();
+    var err = document.getElementById("err");
+    err.textContent = "";
+    if (!name && !email && !phone) { err.textContent = "Please add your name and a way to reach you."; return; }
+    if (!email && !phone) { err.textContent = "Please add an email or phone."; return; }
+
+    var btn = document.getElementById("submit");
+    btn.disabled = true; btn.textContent = "Sending…";
+
+    fetch("/api/fub", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "lead",
+        type: q.get("type") || "Seller Inquiry",
+        source: q.get("source") || "CloseAssist Landing Page",
+        name: name, email: email, phone: phone,
+        propertyAddress: address,
+        message: "Home value request via landing page" + (address ? (" for " + address) : ""),
+        tags: ["CloseAssist", "Home Value Lead"]
+      })
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (res) {
+        if (res.ok) {
+          document.getElementById("form").style.display = "none";
+          document.getElementById("done").style.display = "block";
+        } else {
+          err.textContent = (res.d && res.d.error) || "Something went wrong. Please try again.";
+          btn.disabled = false; btn.textContent = "Get my home value →";
+        }
+      })
+      .catch(function () {
+        err.textContent = "Network error. Please try again.";
+        btn.disabled = false; btn.textContent = "Get my home value →";
+      });
+  }
+</script>
+</body>
+</html>

@@ -382,6 +382,40 @@ function Newsletter() {
 }
 
 // ============ LISTINGS & APPOINTMENTS ============
+function ListingPresentation() {
+  const [d, setD] = useState({ address: "", seller: "", price: "", comps: "", marketing: "", why: "" });
+  const set = (k, v) => setD((p) => ({ ...p, [k]: v }));
+  const t = useTool();
+  const run = () => {
+    if (!d.address.trim()) return t.setError("Add at least the property address.");
+    const facts = [
+      "Property: " + d.address,
+      d.seller && "Seller(s): " + d.seller,
+      d.price && "Suggested list price / range: " + d.price,
+      d.comps && "Comps / market context: " + d.comps,
+      d.marketing && "Marketing plan highlights: " + d.marketing,
+      d.why && "Why this agent (differentiators): " + d.why,
+    ].filter(Boolean).join("\n");
+    t.generate(LISTPRES_SYSTEM, facts);
+  };
+  return (<div>
+    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "11px 14px", marginBottom: 18 }}>
+      <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Turn your notes into a structured listing presentation you can deliver or send — pricing story, marketing plan, your value, and next steps. Edit and make it yours before presenting.</p>
+    </div>
+    <Field label="Property address"><input style={inputStyle} value={d.address} onChange={(e) => set("address", e.target.value)} placeholder="123 Oak St, Naperville IL" /></Field>
+    <Field label="Seller name(s) (optional)"><input style={inputStyle} value={d.seller} onChange={(e) => set("seller", e.target.value)} placeholder="The Johnsons" /></Field>
+    <Field label="Suggested price / range"><input style={inputStyle} value={d.price} onChange={(e) => set("price", e.target.value)} placeholder="$615,000–$635,000" /></Field>
+    <Field label="Comps / market context"><textarea style={{ ...inputStyle, minHeight: 70 }} value={d.comps} onChange={(e) => set("comps", e.target.value)} placeholder="3 nearby sales $600–640k last 60 days; low inventory; homes moving in ~3 weeks." /></Field>
+    <Field label="Your marketing plan"><textarea style={{ ...inputStyle, minHeight: 70 }} value={d.marketing} onChange={(e) => set("marketing", e.target.value)} placeholder="Pro photos + video, staging consult, MLS + Zillow/social, broker open, email to my database, paid social." /></Field>
+    <Field label="Why you (differentiators)"><textarea style={{ ...inputStyle, minHeight: 60 }} value={d.why} onChange={(e) => set("why", e.target.value)} placeholder="20 listings closed last year, avg 98% of list, 18 days on market, deep buyer network in this area." /></Field>
+    <div style={{ height: 6 }} />
+    <RunButton onClick={run} loading={t.loading}>Build the presentation →</RunButton>
+    <div style={{ marginTop: 22 }}><Results {...t} noun="presentation" onRefine={t.refine} /></div>
+  </div>);
+}
+
+const LISTPRES_SYSTEM = "You are an expert listing agent's assistant building a LISTING PRESENTATION the agent will deliver to win a seller's business. Using only the details provided, produce a clean, professional, sectioned document with these parts, each with a clear header:\n1. COVER / OPENING — a warm, confident intro addressed to the seller(s), establishing you understand their goal of selling for top dollar with the least stress.\n2. UNDERSTANDING YOUR HOME — a short, flattering but honest framing of the property.\n3. PRICING STRATEGY — explain the suggested price/range using the comps/market context given, in plain English; note the strategy and what drives it. Do not invent comps not provided.\n4. MARKETING PLAN — turn the agent's marketing highlights into a compelling, organized plan (photography/staging, online exposure, open houses, database, paid promotion). If the agent gave few details, present a strong standard plan but don't fabricate specific claims.\n5. WHY [AGENT] — build credibility from the differentiators given (use the agent's brand details). Never invent statistics that weren't provided.\n6. WHAT HAPPENS NEXT — clear next steps and a confident call to sign.\nKeep it polished, client-ready, and persuasive without hype. Use the agent's brand/name where natural. This is a working draft for the agent to review and personalize. Return as one document with the numbered section headers; do not use === separators.";
+
 function CMABuilder() {
   const [side, setSide] = useState("Seller (pricing a listing)");
   const [subject, setSubject] = useState("");
@@ -476,6 +510,74 @@ function ConsultPrep() {
     <div style={{ height: 6 }} />
     <RunButton onClick={run} loading={t.loading}>Prep me →</RunButton>
     <div style={{ marginTop: 22 }}><Results {...t} noun="part" onRefine={t.refine} /></div>
+  </div>);
+}
+
+function DeadlineTracker() {
+  const [accept, setAccept] = useState("");
+  const [closing, setClosing] = useState("");
+  const [addr, setAddr] = useState("");
+
+  const addCalDays = (base, days) => { const d = new Date(base + "T00:00:00"); d.setDate(d.getDate() + days); return d; };
+  const addBizDays = (base, days) => {
+    const d = new Date(base + "T00:00:00"); let added = 0;
+    while (added < days) { d.setDate(d.getDate() + 1); const dow = d.getDay(); if (dow !== 0 && dow !== 6) added++; }
+    return d;
+  };
+  const fmt = (d) => d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+
+  const milestones = accept ? (() => {
+    const list = [
+      { label: "Attorney Review ends", date: addBizDays(accept, 5), note: "Para 13 — 5 business days" },
+      { label: "Inspection notice due", date: addBizDays(accept, 5), note: "Para 15 — typically 5 business days" },
+      { label: "Homeowner insurance contingency", date: addBizDays(accept, 10), note: "Para 9 — 10 business days" },
+      { label: "Financing approval (contingency date)", date: addCalDays(accept, 45), note: "Para 8 — 45 calendar days (or 5 biz days before closing, whichever earlier)" },
+    ];
+    if (closing) {
+      const fiveBefore = addBizDays(closing, -5);
+      list.push({ label: "Closing", date: new Date(closing + "T00:00:00"), note: "Para 5" });
+      void fiveBefore;
+    }
+    return list.sort((a, b) => a.date - b.date);
+  })() : [];
+
+  const exportCal = () => {
+    const items = milestones.map((m) => ({ date: ymd(m.date), noun: m.label, text: m.label + (addr ? (" — " + addr) : "") + "\n" + m.note }));
+    downloadICS(items, "closeassist-deadlines.ics");
+  };
+  const copyText = () => {
+    const L = ["TRANSACTION DEADLINES" + (addr ? " — " + addr : ""), accept ? ("Date of Acceptance: " + fmt(new Date(accept + "T00:00:00"))) : "", ""];
+    milestones.forEach((m) => L.push(fmt(m.date) + " — " + m.label + "  (" + m.note + ")"));
+    L.push(""); L.push("Estimate from standard Multi-Board 8.0 timelines — verify against the executed contract and any riders.");
+    navigator.clipboard?.writeText(L.filter((x) => x !== undefined).join("\n"));
+  };
+
+  return (<div>
+    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "11px 14px", marginBottom: 18 }}>
+      <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Enter the date of acceptance and it maps the key Multi-Board 8.0 deadlines (attorney review, inspection, insurance, financing). Export them to your calendar with reminders. <b>Estimate — always verify against the executed contract.</b></p>
+    </div>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      <div style={{ flex: "1 1 150px" }}><Field label="Date of Acceptance"><input type="date" style={inputStyle} value={accept} onChange={(e) => setAccept(e.target.value)} /></Field></div>
+      <div style={{ flex: "1 1 150px" }}><Field label="Closing date (optional)"><input type="date" style={inputStyle} value={closing} onChange={(e) => setClosing(e.target.value)} /></Field></div>
+    </div>
+    <Field label="Property (optional)"><input style={inputStyle} value={addr} onChange={(e) => setAddr(e.target.value)} placeholder="123 Oak St" /></Field>
+
+    {milestones.length > 0 && <div style={{ marginTop: 14, border: `2px solid ${C.ink}`, borderRadius: 5, overflow: "hidden" }}>
+      <div style={{ background: C.ink, color: "#fff", padding: "10px 14px", fontFamily: SER, fontWeight: 700, fontSize: 16 }}>Key Deadlines</div>
+      <div style={{ padding: 14 }}>
+        {milestones.map((m, i) => (
+          <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: i < milestones.length - 1 ? `1px solid ${C.line}` : "none" }}>
+            <div><div style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: C.ink }}>{m.label}</div><div style={{ fontFamily: SAN, fontSize: 11.5, color: C.faint }}>{m.note}</div></div>
+            <div style={{ fontFamily: SAN, fontSize: 13, fontWeight: 700, color: C.moss, whiteSpace: "nowrap" }}>{fmt(m.date)}</div>
+          </div>
+        ))}
+      </div>
+    </div>}
+
+    {milestones.length > 0 && <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+      <button onClick={exportCal} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: "#fff", background: C.moss, border: "none", borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Add deadlines to calendar</button>
+      <button onClick={copyText} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: C.ink, background: "transparent", border: `1.5px solid ${C.ink}`, borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Copy</button>
+    </div>}
   </div>);
 }
 
@@ -1393,6 +1495,7 @@ const GROUPS = [
   ] },
   { name: "Listings & Appointments", color: "#2c5d8a", tabs: [
     { id: "listing", label: "Listing Writer", sub: "Property notes in, a description that sells out.", el: Listing },
+    { id: "listpres", label: "Listing Presentation", sub: "Your notes into a deliver-ready presentation to win the listing.", el: ListingPresentation },
     { id: "cma", label: "CMA Builder", sub: "Bring your comps — get the analysis, a price range & a client-ready writeup.", el: CMABuilder },
     { id: "price", label: "Price Reduced", sub: "Reframe a price drop as opportunity, not desperation.", el: PriceReduced },
     { id: "open", label: "Open-House Script", sub: "A game plan for the door, walkthrough, and follow-up.", el: OpenHouse },
@@ -1406,6 +1509,7 @@ const GROUPS = [
     { id: "sign", label: "Signature Request", sub: "The message that goes out with your e-signature envelope.", el: SignatureRequest },
     { id: "commission", label: "Commission Statement", sub: "Punch in the numbers — get your commission statement, totaled and ready to send.", el: CommissionStatement },
     { id: "netsheet", label: "Seller Net Sheet", sub: "Estimate seller closing costs & net proceeds (IL). AI fills the back-end costs.", el: SellerNetSheet },
+    { id: "deadlines", label: "Deadline Tracker", sub: "Acceptance date in — key 8.0 deadlines out, exported to your calendar.", el: DeadlineTracker },
   ] },
 ];
 const ALL = GROUPS.flatMap((g) => g.tabs);
