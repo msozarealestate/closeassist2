@@ -479,6 +479,216 @@ function ConsultPrep() {
   </div>);
 }
 
+function SellerNetSheet() {
+  const [f, setF] = useState({
+    brokerage: "", address: "", city: "", county: "",
+    price: "", loanPayoff: "", commPct: "6", commFlat: "",
+    annualTax: "", taxProrationMonths: "", attorney: "750",
+    sellerCredit: "", hoa: "", otherLiens: "",
+    // AI/override-able back-end estimates:
+    title: "", transferState: "", transferCounty: "", transferCity: "",
+    recording: "", settlement: "", survey: "", misc: "",
+  });
+  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  const [busy, setBusy] = useState(false);
+  const [aiNote, setAiNote] = useState("");
+  const [err, setErr] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  const num = (v) => { const n = Number(String(v).replace(/[^0-9.]/g, "")); return isFinite(n) ? n : 0; };
+  const has = (v) => String(v).trim() !== "";
+  const money = (n) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const price = num(f.price);
+
+  // IL transfer tax formulas (defaults; editable). State $0.50 / $500, County $0.25 / $500.
+  const stateStamp = has(f.transferState) ? num(f.transferState) : (price ? Math.ceil(price / 500) * 0.5 : 0);
+  const countyStamp = has(f.transferCounty) ? num(f.transferCounty) : (price ? Math.ceil(price / 500) * 0.25 : 0);
+  const cityStamp = num(f.transferCity); // city stamp varies wildly; only if entered/AI-filled
+
+  const commission = has(f.commFlat) ? num(f.commFlat) : (price && has(f.commPct) ? price * num(f.commPct) / 100 : 0);
+
+  // Tax proration: months of the year owed × (annual/12), agent enters months.
+  const taxProration = (has(f.annualTax) && has(f.taxProrationMonths)) ? num(f.annualTax) / 12 * num(f.taxProrationMonths) : 0;
+
+  const lineVals = {
+    commission,
+    attorney: num(f.attorney),
+    title: num(f.title),
+    stateStamp, countyStamp, cityStamp,
+    recording: num(f.recording),
+    settlement: num(f.settlement),
+    survey: num(f.survey),
+    taxProration,
+    sellerCredit: num(f.sellerCredit),
+    hoa: num(f.hoa),
+    otherLiens: num(f.otherLiens),
+    misc: num(f.misc),
+  };
+  const totalCosts = Object.values(lineVals).reduce((a, b) => a + b, 0);
+  const loanPayoff = num(f.loanPayoff);
+  const netToSeller = price - loanPayoff - totalCosts;
+
+  const estimateWithAI = async () => {
+    if (!price) return setErr("Enter a sale price first so the estimate has something to work from.");
+    setBusy(true); setErr(""); setAiNote("");
+    const sys = "You estimate typical SELLER-side closing costs for an Illinois residential sale. Return ONLY a JSON object, no prose, no markdown, with numeric dollar estimates (numbers only, no $ or commas) for these keys: title (owner's title insurance premium), recording (recording/deed fees), settlement (title company settlement/closing fee), survey (typical plat of survey cost), transferCity (municipal transfer stamp for the city given, 0 if the city has none or is unknown), misc (small buffer for misc charges). Base them on standard Illinois rates and the sale price. If a city is given and it has a known municipal transfer tax (e.g., Chicago), reflect it in transferCity; otherwise 0. Do not include state or county transfer tax (those are computed separately). Keep estimates realistic and conservative.";
+    const user = "Sale price: $" + price + (has(f.city) ? ("\nCity: " + f.city) : "") + (has(f.county) ? ("\nCounty: " + f.county) : "") + "\nState: Illinois";
+    try {
+      const raw = await askClaude(sys, user);
+      const clean = raw.replace(/```json|```/g, "").trim();
+      const obj = JSON.parse(clean);
+      setF((p) => ({
+        ...p,
+        title: p.title || (obj.title != null ? String(Math.round(obj.title)) : p.title),
+        recording: p.recording || (obj.recording != null ? String(Math.round(obj.recording)) : p.recording),
+        settlement: p.settlement || (obj.settlement != null ? String(Math.round(obj.settlement)) : p.settlement),
+        survey: p.survey || (obj.survey != null ? String(Math.round(obj.survey)) : p.survey),
+        transferCity: p.transferCity || (obj.transferCity != null ? String(Math.round(obj.transferCity)) : p.transferCity),
+        misc: p.misc || (obj.misc != null ? String(Math.round(obj.misc)) : p.misc),
+      }));
+      setAiNote("Estimated the blank back-end lines. Review and override any that look off, then confirm with your title company.");
+    } catch (e) {
+      setErr("Couldn't parse the estimate. Try again, or enter the back-end numbers manually.");
+    } finally { setBusy(false); }
+  };
+
+  const brokerName = has(f.brokerage) ? f.brokerage.trim() : "[Your Brokerage]";
+
+  const buildText = () => {
+    const L = [];
+    L.push(brokerName.toUpperCase());
+    L.push("Estimated Seller Net Sheet");
+    L.push("(Estimate only — confirm all figures with your title company.)");
+    L.push("");
+    if (has(f.address)) L.push("Property: " + f.address);
+    if (has(f.city) || has(f.county)) L.push([f.city, f.county && (f.county + " County"), "IL"].filter(Boolean).join(", "));
+    L.push("");
+    L.push("Sale Price: " + money(price));
+    L.push("");
+    L.push("LESS CLOSING COSTS:");
+    const add = (label, v) => { if (v) L.push("  " + label + ": " + money(v)); };
+    add("Loan Payoff", loanPayoff);
+    add("Real Estate Commission" + (has(f.commPct) && !has(f.commFlat) ? " (" + num(f.commPct) + "%)" : ""), commission);
+    add("Attorney Fee", lineVals.attorney);
+    add("Owner's Title Insurance", lineVals.title);
+    add("State Transfer Tax", stateStamp);
+    add("County Transfer Tax", countyStamp);
+    add("City/Municipal Transfer Tax", cityStamp);
+    add("Recording Fees", lineVals.recording);
+    add("Settlement / Closing Fee", lineVals.settlement);
+    add("Survey", lineVals.survey);
+    add("Property Tax Proration" + (has(f.taxProrationMonths) ? " (" + num(f.taxProrationMonths) + " mo)" : ""), taxProration);
+    add("Seller Credit to Buyer", lineVals.sellerCredit);
+    add("HOA / Association Dues", lineVals.hoa);
+    add("Other Liens / Judgments", lineVals.otherLiens);
+    add("Miscellaneous", lineVals.misc);
+    L.push("");
+    L.push("Total Costs + Payoff: " + money(totalCosts + loanPayoff));
+    L.push("ESTIMATED NET TO SELLER: " + money(netToSeller));
+    L.push("");
+    L.push("Prepared by " + brokerName + " — estimate only, not a closing disclosure.");
+    return L.join("\n");
+  };
+
+  const copy = async () => { try { await navigator.clipboard.writeText(buildText()); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch {} };
+  const email = () => { window.location.href = "mailto:?subject=" + encodeURIComponent("Estimated Seller Net Sheet — " + (f.address || "")) + "&body=" + encodeURIComponent(buildText()); };
+
+  const half = { flex: "1 1 150px" };
+  const fld = (label, key, ph) => <div style={half}><Field label={label}><input style={inputStyle} value={f[key]} onChange={(e) => set(key, e.target.value)} placeholder={ph} /></Field></div>;
+  const row = (label, v, bold, neg) => (v || v === 0) ? <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "5px 0", borderBottom: `1px solid ${C.line}` }}><span style={{ fontFamily: SAN, fontSize: 13, color: C.ink, fontWeight: bold ? 700 : 400 }}>{label}</span><span style={{ fontFamily: SAN, fontSize: 13, color: bold ? C.ink : C.faint, fontWeight: bold ? 700 : 600 }}>{neg && v ? "−" : ""}{money(v)}</span></div> : null;
+
+  return (<div>
+    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "11px 14px", marginBottom: 18 }}>
+      <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Illinois seller net sheet. You enter the deal numbers; tap <b>Estimate with AI</b> to fill typical title/recording/settlement costs, then override anything. State & county transfer taxes auto-calculate. Every line is editable. <b>Estimate only — confirm with your title company.</b></p>
+    </div>
+
+    <Field label="Your brokerage (shown on the sheet)"><input style={inputStyle} value={f.brokerage} onChange={(e) => set("brokerage", e.target.value)} placeholder="e.g. Smart Home Realty" /></Field>
+    <Field label="Property address"><input style={inputStyle} value={f.address} onChange={(e) => set("address", e.target.value)} placeholder="9911 S Peoria St" /></Field>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      {fld("City", "city", "Chicago")}
+      {fld("County", "county", "Cook")}
+    </div>
+
+    <div style={{ fontFamily: SAN, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: C.moss, margin: "16px 0 8px" }}>Deal numbers (you enter)</div>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      {fld("Sale Price", "price", "$300,000")}
+      {fld("Loan Payoff", "loanPayoff", "$185,000")}
+    </div>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      {fld("Commission %", "commPct", "6")}
+      {fld("…or flat commission $", "commFlat", "leave blank to use %")}
+    </div>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      {fld("Annual Property Tax", "annualTax", "$6,000")}
+      {fld("Tax proration (months owed)", "taxProrationMonths", "e.g. 6")}
+    </div>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      {fld("Attorney Fee", "attorney", "$750")}
+      {fld("Seller Credit to Buyer", "sellerCredit", "$0")}
+    </div>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      {fld("HOA / Association Dues", "hoa", "$0")}
+      {fld("Other Liens / Judgments", "otherLiens", "$0")}
+    </div>
+
+    <div style={{ fontFamily: SAN, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: C.moss, margin: "18px 0 8px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      Back-end costs (AI estimates — override anytime)
+      <button onClick={estimateWithAI} disabled={busy} style={{ fontFamily: SAN, fontSize: 12, fontWeight: 700, color: "#fff", background: busy ? C.faint : C.moss, border: "none", borderRadius: 3, padding: "7px 13px", cursor: busy ? "default" : "pointer", textTransform: "none", letterSpacing: 0 }}>{busy ? "Estimating…" : "Estimate with AI"}</button>
+    </div>
+    {aiNote && <p style={{ fontFamily: SAN, fontSize: 12, color: C.moss, marginTop: 0 }}>{aiNote}</p>}
+    {err && <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.amberDeep, marginTop: 0 }}>{err}</p>}
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      {fld("Owner's Title Insurance", "title", "AI / enter")}
+      {fld("Settlement / Closing Fee", "settlement", "AI / enter")}
+    </div>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      {fld("Recording Fees", "recording", "AI / enter")}
+      {fld("Survey", "survey", "AI / enter")}
+    </div>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      {fld("City/Municipal Transfer Tax", "transferCity", "AI / enter (0 if none)")}
+      {fld("Miscellaneous", "misc", "AI / enter")}
+    </div>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      {fld("State Transfer Tax (auto)", "transferState", "auto from price")}
+      {fld("County Transfer Tax (auto)", "transferCounty", "auto from price")}
+    </div>
+
+    <div style={{ marginTop: 20, border: `2px solid ${C.ink}`, borderRadius: 5, overflow: "hidden" }}>
+      <div style={{ background: C.ink, color: "#fff", padding: "12px 16px", textAlign: "center" }}>
+        <div style={{ fontFamily: SER, fontWeight: 700, fontSize: 19 }}>{brokerName}</div>
+        <div style={{ fontFamily: SAN, fontSize: 13, fontWeight: 600 }}>Estimated Seller Net Sheet</div>
+      </div>
+      <div style={{ padding: 16 }}>
+        {row("Sale Price", price, true)}
+        {row("Loan Payoff", loanPayoff, false, true)}
+        {row("Real Estate Commission", commission, false, true)}
+        {row("Attorney Fee", lineVals.attorney, false, true)}
+        {row("Owner's Title Insurance", lineVals.title, false, true)}
+        {row("State Transfer Tax", stateStamp, false, true)}
+        {row("County Transfer Tax", countyStamp, false, true)}
+        {row("City/Municipal Transfer Tax", cityStamp, false, true)}
+        {row("Recording Fees", lineVals.recording, false, true)}
+        {row("Settlement / Closing Fee", lineVals.settlement, false, true)}
+        {row("Survey", lineVals.survey, false, true)}
+        {row("Property Tax Proration", taxProration, false, true)}
+        {row("Seller Credit to Buyer", lineVals.sellerCredit, false, true)}
+        {row("HOA / Association Dues", lineVals.hoa, false, true)}
+        {row("Other Liens / Judgments", lineVals.otherLiens, false, true)}
+        {row("Miscellaneous", lineVals.misc, false, true)}
+        <div style={{ marginTop: 8 }}>{row("Estimated Net to Seller", netToSeller, true)}</div>
+        <div style={{ marginTop: 12, textAlign: "center", fontFamily: SAN, fontSize: 11.5, color: C.faint, lineHeight: 1.5 }}>Estimate only — confirm all figures with your title company. Not a closing disclosure.</div>
+      </div>
+    </div>
+
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+      <button onClick={copy} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: copied ? "#fff" : C.ink, background: copied ? C.moss : "transparent", border: `1.5px solid ${copied ? C.moss : C.ink}`, borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>{copied ? "Copied ✓" : "Copy net sheet"}</button>
+      <button onClick={email} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: C.ink, background: "transparent", border: `1.5px solid ${C.ink}`, borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Email it</button>
+    </div>
+  </div>);
+}
+
 function CommissionStatement() {
   const { profile } = useContext(ProfileCtx);
   const [f, setF] = useState({
@@ -1195,6 +1405,7 @@ const GROUPS = [
     { id: "compare", label: "Offer Compare", sub: "Paste competing offers — get them ranked with a pick to present.", el: OfferCompare },
     { id: "sign", label: "Signature Request", sub: "The message that goes out with your e-signature envelope.", el: SignatureRequest },
     { id: "commission", label: "Commission Statement", sub: "Punch in the numbers — get your commission statement, totaled and ready to send.", el: CommissionStatement },
+    { id: "netsheet", label: "Seller Net Sheet", sub: "Estimate seller closing costs & net proceeds (IL). AI fills the back-end costs.", el: SellerNetSheet },
   ] },
 ];
 const ALL = GROUPS.flatMap((g) => g.tabs);
@@ -1202,6 +1413,51 @@ const ALL = GROUPS.flatMap((g) => g.tabs);
 const savedCard = { background: C.paper, border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "13px 15px" };
 const savedHead = { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 };
 const savedText = { fontFamily: SAN, fontSize: 14, lineHeight: 1.5, color: C.ink, whiteSpace: "pre-wrap", margin: 0 };
+
+function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+function ymd(d) { return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
+function icsDate(dateStr) { return dateStr.replace(/-/g, ""); } // all-day YYYYMMDD
+function icsEscape(s) { return String(s || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n"); }
+
+function buildICS(items) {
+  // items: [{ text, noun, date 'YYYY-MM-DD' }]
+  const now = new Date();
+  const stamp = now.getUTCFullYear() + pad2(now.getUTCMonth() + 1) + pad2(now.getUTCDate()) + "T" + pad2(now.getUTCHours()) + pad2(now.getUTCMinutes()) + pad2(now.getUTCSeconds()) + "Z";
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//CloseAssist//Content Calendar//EN", "CALSCALE:GREGORIAN"];
+  items.forEach((it, i) => {
+    if (!it.date) return;
+    const start = icsDate(it.date);
+    const d = new Date(it.date + "T00:00:00"); d.setDate(d.getDate() + 1);
+    const end = ymd(d).replace(/-/g, "");
+    const title = (it.noun ? ("Post: " + it.noun) : "CloseAssist post");
+    const firstLine = String(it.text || "").split("\n")[0].slice(0, 60);
+    lines.push("BEGIN:VEVENT");
+    lines.push("UID:closeassist-" + Date.now() + "-" + i + "@closeassist");
+    lines.push("DTSTAMP:" + stamp);
+    lines.push("DTSTART;VALUE=DATE:" + start);
+    lines.push("DTEND;VALUE=DATE:" + end);
+    lines.push("SUMMARY:" + icsEscape(title + (firstLine ? (" — " + firstLine) : "")));
+    lines.push("DESCRIPTION:" + icsEscape(it.text));
+    lines.push("BEGIN:VALARM");
+    lines.push("TRIGGER:-PT2H");
+    lines.push("ACTION:DISPLAY");
+    lines.push("DESCRIPTION:" + icsEscape("Time to post: " + title));
+    lines.push("END:VALARM");
+    lines.push("END:VEVENT");
+  });
+  lines.push("END:VCALENDAR");
+  return lines.join("\r\n");
+}
+
+function downloadICS(items, filename) {
+  const ics = buildICS(items);
+  const blob = new Blob([ics], { type: "text/calendar;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename || "closeassist-calendar.ics";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 function SavedDrawer({ open, onClose }) {
   const { saved, remove, update } = useContext(SavedCtx);
@@ -1211,6 +1467,20 @@ function SavedDrawer({ open, onClose }) {
   const copyAll = () => { if (!saved.length) return; navigator.clipboard?.writeText(saved.map((s, i) => "— " + s.noun + " " + (i + 1) + " —\n" + s.text).join("\n\n")); setCopiedAll(true); setTimeout(() => setCopiedAll(false), 1500); };
   const week = DAYS.map(() => []); let auto = 0;
   saved.forEach((it) => { let d = typeof it.day === "number" ? it.day : (auto++ % 7); week[d].push(it); });
+
+  // Calendar (month) state
+  const today = new Date();
+  const [calMonth, setCalMonth] = useState(today.getMonth());
+  const [calYear, setCalYear] = useState(today.getFullYear());
+  const monthName = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][calMonth];
+  const firstDow = new Date(calYear, calMonth, 1).getDay();
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const byDate = {};
+  saved.forEach((s) => { if (s.date) { (byDate[s.date] = byDate[s.date] || []).push(s); } });
+  const scheduledItems = saved.filter((s) => s.date);
+  const prevMonth = () => { if (calMonth === 0) { setCalMonth(11); setCalYear(calYear - 1); } else setCalMonth(calMonth - 1); };
+  const nextMonth = () => { if (calMonth === 11) { setCalMonth(0); setCalYear(calYear + 1); } else setCalMonth(calMonth + 1); };
+
   const tab = (id, label) => <button onClick={() => setView(id)} style={{ fontFamily: SAN, fontSize: 12.5, fontWeight: 700, padding: "5px 12px", borderRadius: 999, cursor: "pointer", border: `1.5px solid ${view === id ? C.ink : C.line}`, background: view === id ? C.ink : "transparent", color: view === id ? C.cream : C.faint }}>{label}</button>;
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", justifyContent: "flex-end" }}>
@@ -1221,7 +1491,7 @@ function SavedDrawer({ open, onClose }) {
           <button onClick={onClose} style={miniBtn(C.faint)}>close ✕</button>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
-          {tab("list", "List")}{tab("week", "Week")}
+          {tab("list", "List")}{tab("week", "Week")}{tab("calendar", "Calendar")}
           <div style={{ flex: 1 }} />
           <button onClick={copyAll} disabled={!saved.length} style={{ fontFamily: SAN, fontSize: 12.5, fontWeight: 700, color: saved.length ? C.cream : C.faint, background: saved.length ? C.amber : "transparent", border: `1.5px solid ${saved.length ? C.amber : C.line}`, borderRadius: 999, padding: "5px 13px", cursor: saved.length ? "pointer" : "default" }}>{copiedAll ? "copied all ✓" : "copy all"}</button>
         </div>
@@ -1240,6 +1510,42 @@ function SavedDrawer({ open, onClose }) {
             ))}</div>
           </div>
         ))}</div>}
+        {view === "calendar" && <div>
+          <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "10px 12px", marginBottom: 14 }}>
+            <p style={{ fontFamily: SAN, fontSize: 12, color: C.faint, lineHeight: 1.5, margin: 0 }}>Give each saved post a date below, then tap <b>Add to my calendar</b> to drop them into your Google/Apple/Outlook calendar — it'll remind you to post. Nothing auto-posts.</p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <button onClick={prevMonth} style={miniBtn(C.ink)}>‹ prev</button>
+            <span style={{ fontFamily: SER, fontWeight: 700, fontSize: 16, color: C.ink }}>{monthName} {calYear}</span>
+            <button onClick={nextMonth} style={miniBtn(C.ink)}>next ›</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 3, marginBottom: 14 }}>
+            {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <div key={i} style={{ fontFamily: SAN, fontSize: 10, fontWeight: 700, color: C.faint, textAlign: "center", padding: "2px 0" }}>{d}</div>)}
+            {Array.from({ length: firstDow }).map((_, i) => <div key={"e" + i} />)}
+            {Array.from({ length: daysInMonth }).map((_, i) => {
+              const day = i + 1;
+              const ds = calYear + "-" + pad2(calMonth + 1) + "-" + pad2(day);
+              const count = (byDate[ds] || []).length;
+              const isToday = ds === ymd(today);
+              return <div key={day} style={{ minHeight: 34, border: `1px solid ${count ? C.moss : C.line}`, borderRadius: 3, padding: 2, background: count ? "rgba(31,58,95,.07)" : "#fff", textAlign: "center" }}>
+                <div style={{ fontFamily: SAN, fontSize: 10.5, fontWeight: isToday ? 700 : 400, color: isToday ? C.amber : C.ink }}>{day}</div>
+                {count > 0 && <div style={{ fontFamily: SAN, fontSize: 9, color: C.moss, fontWeight: 700 }}>{count} post{count > 1 ? "s" : ""}</div>}
+              </div>;
+            })}
+          </div>
+          <button onClick={() => downloadICS(scheduledItems, "closeassist-content-calendar.ics")} disabled={!scheduledItems.length} style={{ width: "100%", fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: scheduledItems.length ? "#fff" : C.faint, background: scheduledItems.length ? C.moss : "transparent", border: `1.5px solid ${scheduledItems.length ? C.moss : C.line}`, borderRadius: 3, padding: "11px", cursor: scheduledItems.length ? "pointer" : "default", marginBottom: 16 }}>Add to my calendar ({scheduledItems.length} dated)</button>
+          <div style={{ display: "grid", gap: 10 }}>{saved.map((s) => (
+            <div key={s.id} style={{ ...savedCard, padding: "11px 13px" }}>
+              <div style={savedHead}><span style={{ fontFamily: SER, fontStyle: "italic", fontSize: 12, color: C.faint }}>{s.noun}</span>
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <input type="date" value={s.date || ""} onChange={(e) => update(s.id, { date: e.target.value })} style={{ fontFamily: SAN, fontSize: 11.5, color: C.ink, background: C.cream, border: `1px solid ${C.line}`, borderRadius: 2, padding: "2px 4px" }} />
+                  <button onClick={() => downloadICS([s], "post.ics")} disabled={!s.date} style={miniBtn(s.date ? C.moss : C.faint)}>+cal</button>
+                  <button onClick={() => remove(s.id)} style={miniBtn(C.amberDeep)}>✕</button>
+                </div></div>
+              <p style={{ ...savedText, fontSize: 13, maxHeight: 70, overflow: "hidden" }}>{s.text}</p>
+            </div>
+          ))}</div>
+        </div>}
       </div>
     </div>
   );
