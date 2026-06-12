@@ -48,6 +48,7 @@ const API_GENERATE = "/api/generate";
 const API_ANALYZE = "/api/analyze";
 const API_LOGIN = "/api/login";
 const API_FUB = "/api/fub";
+const FEEDBACK_EMAIL = "msozarealestate@gmail.com"; // testers' feedback goes here
 let TOKEN = "";
 
 async function fubCall(payload) {
@@ -1735,6 +1736,17 @@ function App() {
   const update = (id, patch) => setSaved((s) => s.map((x) => (x.id === id ? { ...x, ...patch } : x)));
   const hasBrand = Object.values(profile).some((v) => v && v.trim());
 
+  const [showWelcome, setShowWelcome] = useState(false);
+  useEffect(() => { (async () => { if (STORE_OK) { try { const r = await window.storage.get("closeassist-welcomed"); if (!r) setShowWelcome(true); } catch { setShowWelcome(true); } } })(); }, []);
+  const dismissWelcome = async (forever) => { setShowWelcome(false); if (forever && STORE_OK) { try { await window.storage.set("closeassist-welcomed", "1"); } catch {} } };
+
+  const sendFeedback = () => {
+    const to = (typeof FEEDBACK_EMAIL !== "undefined" && FEEDBACK_EMAIL) || "";
+    const subject = "CloseAssist feedback";
+    const body = "What I was doing:\n\nWhat happened / what's confusing:\n\nWhat I'd want instead:\n\n(Tool I was on: " + (meta ? meta.label : "") + ")";
+    window.location.href = "mailto:" + to + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
+  };
+
   const headBtn = (label, onClick, filled) => <button onClick={onClick} style={{ fontFamily: SAN, fontSize: 13, fontWeight: 700, color: filled ? C.cream : C.ink, background: filled ? C.ink : "transparent", border: `1.5px solid ${C.ink}`, borderRadius: 999, padding: "7px 15px", cursor: "pointer" }}>{label}</button>;
 
   if (!authChecked) return <div style={{ minHeight: "100vh", background: C.cream }} />;
@@ -1753,11 +1765,30 @@ function App() {
               <div style={{ display: "flex", gap: 8 }}>
                 {headBtn(hasBrand ? "⚙ Brand ✓" : "⚙ Brand", () => setDrawer("brand"), hasBrand)}
                 {headBtn("★ Saved" + (saved.length ? " (" + saved.length + ")" : ""), () => setDrawer("saved"), false)}
+                {headBtn("✉ Feedback", sendFeedback, false)}
                 {headBtn("Sign out", signOut, false)}
               </div>
             </div>
             <p style={{ fontFamily: SAN, fontSize: 13.5, color: C.faint, marginTop: 6, maxWidth: 540, lineHeight: 1.5 }}>Follow up faster, handle objections cleaner, post more often — without the blank-page grind.</p>
           </div>
+
+          {showWelcome && <div style={{ maxWidth: 820, margin: "18px auto 0", padding: "0 28px" }}>
+            <div style={{ background: "#fff", border: `2px solid ${accent}`, borderRadius: 6, padding: "18px 20px", boxShadow: `5px 5px 0 ${accent}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+                <span style={{ fontFamily: SER, fontWeight: 700, fontSize: 20, color: C.ink }}>Welcome — start here 👋</span>
+                <button onClick={() => dismissWelcome(false)} style={{ ...miniBtn(C.faint), fontSize: 13 }}>hide</button>
+              </div>
+              <ol style={{ fontFamily: SAN, fontSize: 13.5, color: C.ink, lineHeight: 1.7, margin: "10px 0 4px", paddingLeft: 20 }}>
+                <li><b>Set your Brand first</b> (⚙ Brand, top right) — your name, team & brokerage. It signs everything you create as you. Takes 30 seconds.</li>
+                <li><b>Pick a tool</b> from the groups below — start with <b>Follow-Up Writer</b> or <b>Listing Writer</b> to see how it works.</li>
+                <li>On any result: <b>copy</b>, <b>save ☆</b>, or <b>refine</b> (tell it "shorter / warmer" and it rewrites).</li>
+                <li>Tap <b>★ Saved</b> to revisit anything — there's a <b>Calendar</b> view to schedule posts and send them to your phone's calendar.</li>
+                <li>Found something broken or confusing? Hit <b>✉ Feedback</b> any time.</li>
+              </ol>
+              <p style={{ fontFamily: SAN, fontSize: 12, color: C.faint, lineHeight: 1.5, margin: "8px 0 12px" }}>Everything you write is a draft — review before you send, and follow your usual fair-housing/advertising rules. Your Brand & saved items live on this device.</p>
+              <button onClick={() => dismissWelcome(true)} style={{ fontFamily: SAN, fontSize: 13, fontWeight: 700, color: "#fff", background: accent, border: "none", borderRadius: 3, padding: "9px 18px", cursor: "pointer" }}>Got it — don't show again</button>
+            </div>
+          </div>}
 
           <div style={{ maxWidth: 820, margin: "0 auto", padding: "18px 28px 0" }}>
             {GROUPS.map((g) => (
