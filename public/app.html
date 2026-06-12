@@ -47,7 +47,24 @@ const AccentCtx = createContext("#c0392b"); // current group accent
 const API_GENERATE = "/api/generate";
 const API_ANALYZE = "/api/analyze";
 const API_LOGIN = "/api/login";
+const API_FUB = "/api/fub";
 let TOKEN = "";
+
+async function fubCall(payload) {
+  const res = await fetch(API_FUB, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-app-token": TOKEN },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && (!data || !data.error || /unauthor/i.test(data.error))) {
+    TOKEN = ""; try { await window.storage.delete("closeassist-token"); } catch {}
+    window.dispatchEvent(new Event("closeassist-logout"));
+    throw new Error("Session expired — please log in again.");
+  }
+  if (!res.ok) throw new Error(data.error || ("Request failed (" + res.status + ")"));
+  return data;
+}
 
 async function askClaude(system, user) {
   const res = await fetch(API_GENERATE, {
@@ -439,6 +456,183 @@ function contractSystem(docType, signers, sigInstr) {
 }
 const STORE_OK = typeof window !== "undefined" && window.storage;
 
+function OfferBuilder() {
+  const [side, setSide] = useState("Buyer side (writing)");
+  const [d, setD] = useState({
+    buyers: "", sellers: "", address: "", mls: "", list: "", offer: "",
+    earnest: "", earnestDays: "5", credit: "", buyerComp: "",
+    financing: "Conventional", close: "", possession: "At closing",
+    inspection: "Inspect w/ repair requests (15b)", apprAddendum: "No",
+    homeSale: "No", extra: "",
+  });
+  const t = useTool();
+  const set = (k, v) => setD((p) => ({ ...p, [k]: v }));
+
+  const run = () => {
+    if (!d.address.trim() || !d.offer.trim()) return t.setError("Add at least the property address and offer price.");
+    const facts = [
+      "TRANSACTION SIDE: " + side,
+      d.buyers && "Buyer(s): " + d.buyers,
+      d.sellers && "Seller(s): " + d.sellers,
+      "Property: " + d.address,
+      d.mls && "MLS #: " + d.mls,
+      d.list && "List price: " + d.list,
+      "Offer price: " + d.offer,
+      d.earnest && "Earnest money: " + d.earnest + " (due " + d.earnestDays + " business days after acceptance)",
+      d.credit && "Seller credit at closing: " + d.credit,
+      d.buyerComp && "Seller contribution to buyer brokerage comp: " + d.buyerComp,
+      "Financing: " + d.financing,
+      d.close && "Closing date: " + d.close,
+      "Possession: " + d.possession,
+      "Inspection election: " + d.inspection,
+      "Appraisal Addendum attached: " + d.apprAddendum,
+      "Contingent on sale of buyer's home (Para 31): " + d.homeSale,
+      d.extra && "Other terms / notes: " + d.extra,
+    ].filter(Boolean).join("\n");
+    t.generate(OFFER_SYSTEM, facts);
+  };
+
+  const half = { flex: "1 1 150px" };
+  const third = { flex: "1 1 120px" };
+  return (<div>
+    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "11px 14px", marginBottom: 18 }}>
+      <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Enter the deal once — get a copy-ready deal sheet for dotloop, plain-English contingency notes, a cover note to the other agent, and a client explanation. Tuned to the Multi-Board 8.0. It organizes YOUR decisions; it doesn't fill the official form or give legal advice.</p>
+    </div>
+
+    <Field label="Which side are you on?"><Chips options={["Buyer side (writing)", "Seller side (reviewing/countering)"]} value={side} onChange={setSide} /></Field>
+
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      <div style={half}><Field label="Buyer name(s)"><input style={inputStyle} value={d.buyers} onChange={(e) => set("buyers", e.target.value)} placeholder="Maya & Alex Chen" /></Field></div>
+      <div style={half}><Field label="Seller name(s)"><input style={inputStyle} value={d.sellers} onChange={(e) => set("sellers", e.target.value)} placeholder="Robert Diaz" /></Field></div>
+    </div>
+    <Field label="Property address"><input style={inputStyle} value={d.address} onChange={(e) => set("address", e.target.value)} placeholder="123 Oak St, Naperville IL 60540" /></Field>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      <div style={third}><Field label="MLS # (optional)"><input style={inputStyle} value={d.mls} onChange={(e) => set("mls", e.target.value)} placeholder="MRD123456" /></Field></div>
+      <div style={third}><Field label="List price"><input style={inputStyle} value={d.list} onChange={(e) => set("list", e.target.value)} placeholder="$625,000" /></Field></div>
+      <div style={third}><Field label="Offer price"><input style={inputStyle} value={d.offer} onChange={(e) => set("offer", e.target.value)} placeholder="$609,000" /></Field></div>
+    </div>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      <div style={half}><Field label="Earnest money"><input style={inputStyle} value={d.earnest} onChange={(e) => set("earnest", e.target.value)} placeholder="$10,000 or 1.5%" /></Field></div>
+      <div style={third}><Field label="EM due (biz days)"><input style={inputStyle} value={d.earnestDays} onChange={(e) => set("earnestDays", e.target.value)} /></Field></div>
+    </div>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      <div style={half}><Field label="Seller credit at closing"><input style={inputStyle} value={d.credit} onChange={(e) => set("credit", e.target.value)} placeholder="$3,000 (or none)" /></Field></div>
+      <div style={half}><Field label="Seller pays buyer comp"><input style={inputStyle} value={d.buyerComp} onChange={(e) => set("buyerComp", e.target.value)} placeholder="2.5% / $ / none (Para 4)" /></Field></div>
+    </div>
+    <Field label="Financing"><Chips options={["Cash", "Conventional", "FHA", "VA", "USDA"]} value={d.financing} onChange={(v) => set("financing", v)} /></Field>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      <div style={half}><Field label="Closing date"><input style={inputStyle} value={d.close} onChange={(e) => set("close", e.target.value)} placeholder="Aug 15, 2026" /></Field></div>
+      <div style={half}><Field label="Possession"><Chips options={["At closing", "Rent-back"]} value={d.possession} onChange={(v) => set("possession", v)} /></Field></div>
+    </div>
+    <Field label="Inspection election (Para 15)"><Chips options={["Waive (15a)", "Inspect w/ repair requests (15b)", "Inspect, no requests (15c)"]} value={d.inspection} onChange={(v) => set("inspection", v)} /></Field>
+    <div style={{ display: "flex", gap: 28, flexWrap: "wrap", marginBottom: 4 }}>
+      <Field label="Appraisal Addendum?"><Chips options={["No", "Yes"]} value={d.apprAddendum} onChange={(v) => set("apprAddendum", v)} /></Field>
+      <Field label="Home-sale contingency? (Para 31)"><Chips options={["No", "Yes"]} value={d.homeSale} onChange={(v) => set("homeSale", v)} /></Field>
+    </div>
+    <Field label="Anything else about this offer? (optional)"><textarea style={{ ...inputStyle, minHeight: 56 }} value={d.extra} onChange={(e) => set("extra", e.target.value)} placeholder="Appraisal gap coverage up to $10k; quick close; fridge + W/D to convey; flexible on possession." /></Field>
+    <div style={{ height: 6 }} />
+    <RunButton onClick={run} loading={t.loading}>Build the offer →</RunButton>
+    <div style={{ marginTop: 22 }}><Results {...t} noun="offer package" onRefine={t.refine} /></div>
+    <SendToFub deal={d} side={side} />
+  </div>);
+}
+
+function SendToFub({ deal, side }) {
+  const [open, setOpen] = useState(false);
+  const [stages, setStages] = useState(null);   // null = not loaded, [] = loaded none
+  const [stageId, setStageId] = useState("");
+  const [contactName, setContactName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [done, setDone] = useState("");
+
+  // Prefill the contact from whichever side you represent.
+  useEffect(() => {
+    const isBuyerSide = /buyer/i.test(side);
+    const n = isBuyerSide ? deal.buyers : deal.sellers;
+    if (n && !contactName) setContactName(n);
+  }, [side, deal.buyers, deal.sellers]);
+
+  const loadStages = async () => {
+    setErr(""); setBusy(true);
+    try {
+      const r = await fubCall({ action: "stages" });
+      setStages(r.stages || []);
+      if (r.stages && r.stages.length && !stageId) setStageId(String(r.stages[0].id));
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  const openPanel = () => {
+    setOpen(true);
+    if (stages === null) loadStages();
+  };
+
+  const send = async () => {
+    setErr(""); setDone("");
+    if (!contactName.trim() && !email.trim() && !phone.trim()) return setErr("Add at least a name, email, or phone.");
+    if (!stageId) return setErr("Pick a deal stage.");
+    setBusy(true);
+    try {
+      const r = await fubCall({
+        action: "deal",
+        name: contactName,
+        email: email.trim() || undefined,
+        phone: phone.trim() || undefined,
+        stageId: Number(stageId),
+        dealName: deal.address || undefined,
+        propertyAddress: deal.address || undefined,
+        mls: deal.mls || undefined,
+        price: deal.offer || undefined,
+        description: "Offer via CloseAssist — " + side + (deal.offer ? (" — " + deal.offer) : ""),
+        tags: ["CloseAssist"],
+      });
+      if (r.ok) setDone("Sent to Follow Up Boss ✓ — contact + deal created. Your FUB→dotloop integration will create the loop.");
+      else setErr(r.error || "Something went wrong.");
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  if (!open) {
+    return <button onClick={openPanel} style={{ marginTop: 18, fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: "#fff", background: C.moss, border: "none", borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Send to Follow Up Boss →</button>;
+  }
+
+  return (
+    <div style={{ marginTop: 20, border: `1.5px solid ${C.moss}`, borderRadius: 5, padding: 16, background: "#fff" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+        <span style={{ fontFamily: SER, fontWeight: 700, fontSize: 17, color: C.ink }}>Send to Follow Up Boss</span>
+        <button onClick={() => setOpen(false)} style={{ fontFamily: SAN, fontSize: 12, color: C.faint, background: "none", border: "none", cursor: "pointer" }}>close ✕</button>
+      </div>
+      <p style={{ fontFamily: SAN, fontSize: 12, color: C.faint, lineHeight: 1.5, marginTop: 0, marginBottom: 14 }}>Creates a contact + deal in your FUB pipeline. The deal triggers your FUB→dotloop integration to open the loop on your template.</p>
+
+      <Field label="Contact name"><input style={inputStyle} value={contactName} onChange={(e) => setContactName(e.target.value)} placeholder="Client name" /></Field>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: "1 1 150px" }}><Field label="Email"><input style={inputStyle} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="client@email.com" /></Field></div>
+        <div style={{ flex: "1 1 130px" }}><Field label="Phone"><input style={inputStyle} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="555-123-4567" /></Field></div>
+      </div>
+
+      <Field label="Deal stage">
+        {stages === null ? (
+          <div style={{ fontFamily: SAN, fontSize: 13, color: C.faint, padding: "8px 0" }}>{busy ? "Loading your pipeline…" : "—"}</div>
+        ) : stages.length === 0 ? (
+          <div style={{ fontFamily: SAN, fontSize: 13, color: C.amberDeep }}>No stages found. Check your FUB key, or <span onClick={loadStages} style={{ textDecoration: "underline", cursor: "pointer" }}>retry</span>.</div>
+        ) : (
+          <select value={stageId} onChange={(e) => setStageId(e.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
+            {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        )}
+      </Field>
+
+      {err && <p style={{ fontFamily: SAN, fontSize: 13, color: C.amberDeep, margin: "4px 0 10px" }}>{err}</p>}
+      {done && <p style={{ fontFamily: SAN, fontSize: 13, color: C.moss, fontWeight: 600, margin: "4px 0 10px" }}>{done}</p>}
+
+      <button onClick={send} disabled={busy} style={{ fontFamily: SAN, fontSize: 14, fontWeight: 700, color: "#fff", background: busy ? C.faint : C.moss, border: "none", borderRadius: 3, padding: "11px 20px", cursor: busy ? "default" : "pointer" }}>{busy ? "Sending…" : "Create contact + deal"}</button>
+    </div>
+  );
+}
+
+const OFFER_SYSTEM = "You are an expert Illinois real estate transaction strategist helping an agent structure an offer on the Multi-Board Residential Real Estate Contract 8.0. You are given the deal terms and which side the agent represents. Produce ONE document with FOUR clearly headed sections, in this exact order:\n\n=== 1. DEAL SHEET (to enter into dotloop) ===\nA clean, scannable list of every term, labeled and grouped, that the agent can copy straight into the loop: parties, property + MLS#, list vs offer price, earnest money + timing, seller credit, buyer-broker compensation (Para 4), financing type, closing date, possession, inspection election (cite the 15a/b/c choice), appraisal addendum, home-sale contingency, and any other terms. For anything missing that the 8.0 requires, write [TO CONFIRM: ...]. Do not invent values.\n\n=== 2. CONTINGENCY NOTES (risk / benefit) ===\nFor each contingency actually in play (financing Para 8, inspection Para 15, appraisal, home-sale Para 31, attorney review Para 13, insurance Para 9), give one or two plain-English sentences on what it means strategically FOR THE SIDE THE AGENT REPRESENTS — the tradeoff of the choice made (e.g., waiving inspection = stronger offer, more risk). Keep it practical and balanced.\n\n=== 3. COVER NOTE (to the other agent) ===\nA short, professional, persuasive note to the OTHER side's agent presenting (buyer side) or responding to (seller side) this offer. Highlight its strengths. Warm but businesslike. No invented facts.\n\n=== 4. CLIENT EXPLANATION ===\nA clear, friendly explanation to the agent's OWN client of how the offer is structured and WHY each major choice was made, in everyday language a non-expert understands.\n\nRules: Use ONLY the facts provided. Adapt tone and strategy to the stated side. This is a working draft and educational explanation to inform the agent's judgment — it is NOT legal advice, and the agent must verify all terms on the approved form and involve a broker/attorney as appropriate. Keep the whole thing tight and usable. Separate the four sections with their === headers exactly as shown. Do not output any other === separators.";
+
 function ContractPrep() {
   const [docType, setDocType] = useState("Addendum");
   const [terms, setTerms] = useState("");
@@ -717,6 +911,7 @@ const GROUPS = [
     { id: "prep", label: "Consult Prep", sub: "Talking points, questions & objections before you pitch.", el: ConsultPrep },
   ] },
   { name: "Contracts & Signing", color: "#902519", tabs: [
+    { id: "offerbuild", label: "Offer Builder", sub: "Enter the deal once — deal sheet, contingency notes, cover note & client explainer.", el: OfferBuilder },
     { id: "quick", label: "Quick Offer", sub: "Set your buyer once, then one offer per property — address + price.", el: QuickOffer },
     { id: "contract", label: "Contract Prep", sub: "Fill your terms into a clean draft with signature blocks ready for e-sign.", el: ContractPrep },
     { id: "compare", label: "Offer Compare", sub: "Paste competing offers — get them ranked with a pick to present.", el: OfferCompare },
