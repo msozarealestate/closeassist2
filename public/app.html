@@ -57,6 +57,15 @@ function setMuseKey(v) { try { if (window.localStorage) { if (v) window.localSto
 // Zapier webhook for direct "Send to dotloop" (Catch Hook -> dotloop Create Loop). On-device only.
 function dotloopWebhook() { try { return window.localStorage.getItem("ca-zapier-dotloop") || ""; } catch (e) { return ""; } }
 function setDotloopWebhook(v) { try { if (v) window.localStorage.setItem("ca-zapier-dotloop", v); else window.localStorage.removeItem("ca-zapier-dotloop"); } catch (e) {} }
+// Best-effort split of "123 Oak St, Naperville IL 60540" for dotloop Autofill.
+function parseAddress(a) {
+  const out = { street: "", city: "", state: "", zip: "" };
+  if (!a) return out;
+  const m = String(a).match(/^(.*?),\s*([^,]+?)\s+([A-Za-z]{2})\s*(\d{5}(-\d{4})?)?\s*$/);
+  if (m) { out.street = m[1].trim(); out.city = m[2].trim(); out.state = m[3].toUpperCase(); out.zip = m[4] || ""; return out; }
+  out.street = String(a).trim();
+  return out;
+}
 // Draft language: "en" or "es". Stored on-device; "es" appends a Spanish instruction to AI prompts.
 function appLang() { try { return window.localStorage.getItem("ca-lang") || "en"; } catch (e) { return "en"; } }
 function setAppLang(v) { try { window.localStorage.setItem("ca-lang", v); } catch (e) {} }
@@ -1282,11 +1291,16 @@ function SendToDotloop({ deal, side, inline }) {
     if (!loopName.trim()) return setErr("Give the loop a name — usually the property address.");
     setBusy(true);
     try {
+      const pa = parseAddress(deal.address || "");
       const payload = {
         loop_name: loopName.trim(),
         transaction_type: txType === "Purchase" ? "PURCHASE" : txType === "Lease" ? "LEASE" : "LISTING",
         status: "PRE_OFFER",
         property_address: deal.address || "",
+        street_name: pa.street,
+        city: pa.city,
+        state: pa.state,
+        zip_code: pa.zip,
         mls_number: deal.mls || "",
         list_price: deal.list || "",
         offer_price: deal.offer || "",
@@ -1301,7 +1315,7 @@ function SendToDotloop({ deal, side, inline }) {
       };
       const r = await fetch(hook, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!r.ok) throw new Error("Zapier returned " + r.status + " — check the webhook URL.");
-      setDone("Sent ✓ — your Zap is creating the loop in dotloop now. Finish it there.");
+      setDone("Sent ✓ — loop is being created. In dotloop, open your contract and tap Autofill: the details above flow into the form fields.");
     } catch (e) { setErr(e.message || "Couldn't reach the webhook."); } finally { setBusy(false); }
   };
 
@@ -1333,7 +1347,7 @@ function SendToDotloop({ deal, side, inline }) {
             <div style={{ flex: "1 1 150px" }}><Field label="Client email"><input style={inputStyle} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="client@email.com" /></Field></div>
             <div style={{ flex: "1 1 130px" }}><Field label="Client phone"><input style={inputStyle} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="555-123-4567" /></Field></div>
           </div>
-          <p style={{ fontFamily: SAN, fontSize: 12, color: C.faint, lineHeight: 1.5 }}>Deal details (address, MLS #, prices, financing, closing) go automatically from the form above.</p>
+          <p style={{ fontFamily: SAN, fontSize: 12, color: C.faint, lineHeight: 1.5 }}>Deal details (address, MLS #, prices, earnest, financing, closing) go automatically — then tap <b>Autofill</b> on the contract in dotloop to pull them into the form fields.</p>
           {err && <p style={{ fontFamily: SAN, fontSize: 13, color: C.amberDeep }}>{err}</p>}
           {done && <p style={{ fontFamily: SAN, fontSize: 13, color: C.moss, fontWeight: 600 }}>{done}</p>}
           <button onClick={send} disabled={busy} style={{ fontFamily: SAN, fontSize: 14, fontWeight: 700, color: "#fff", background: busy ? C.faint : C.amber, border: "none", borderRadius: 3, padding: "11px 20px", cursor: busy ? "default" : "pointer" }}>{busy ? "Sending…" : "Create loop in dotloop"}</button>
