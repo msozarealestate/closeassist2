@@ -1292,12 +1292,14 @@ function SendToDotloop({ deal, side, inline }) {
     setBusy(true);
     try {
       const pa = parseAddress(deal.address || "");
+      const sm = pa.street.match(/^(\d+[A-Za-z]?)\s+(.+)$/);
       const payload = {
         loop_name: loopName.trim(),
         transaction_type: txType === "Purchase" ? "PURCHASE" : txType === "Lease" ? "LEASE" : "LISTING",
         status: "PRE_OFFER",
         property_address: deal.address || "",
-        street_name: pa.street,
+        street_number: sm ? sm[1] : "",
+        street_name: sm ? sm[2] : pa.street,
         city: pa.city,
         state: pa.state,
         zip_code: pa.zip,
