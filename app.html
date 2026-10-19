@@ -54,6 +54,9 @@ let TOKEN = "";
 // AI calls go straight from the browser to Anthropic on the user's key.
 function museKey() { try { return (window.localStorage && window.localStorage.getItem("ca-claude-key")) || ""; } catch (e) { return ""; } }
 function setMuseKey(v) { try { if (window.localStorage) { if (v) window.localStorage.setItem("ca-claude-key", v); else window.localStorage.removeItem("ca-claude-key"); } } catch (e) {} }
+// Zapier webhook for direct "Send to dotloop" (Catch Hook -> dotloop Create Loop). On-device only.
+function dotloopWebhook() { try { return window.localStorage.getItem("ca-zapier-dotloop") || ""; } catch (e) { return ""; } }
+function setDotloopWebhook(v) { try { if (v) window.localStorage.setItem("ca-zapier-dotloop", v); else window.localStorage.removeItem("ca-zapier-dotloop"); } catch (e) {} }
 // Draft language: "en" or "es". Stored on-device; "es" appends a Spanish instruction to AI prompts.
 function appLang() { try { return window.localStorage.getItem("ca-lang") || "en"; } catch (e) { return "en"; } }
 function setAppLang(v) { try { window.localStorage.setItem("ca-lang", v); } catch (e) {} }
@@ -1058,6 +1061,7 @@ function OfferBuilder() {
     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-start", marginTop: 18 }}>
       <CopyDealData deal={d} side={side} />
       <SendToFub deal={d} side={side} inline />
+      <SendToDotloop deal={d} side={side} inline />
     </div>
   </div>);
 }
@@ -1239,6 +1243,102 @@ function SendToFub({ deal, side, inline }) {
       {done && <p style={{ fontFamily: SAN, fontSize: 13, color: C.moss, fontWeight: 600, margin: "4px 0 10px" }}>{done}</p>}
 
       <button onClick={send} disabled={busy} style={{ fontFamily: SAN, fontSize: 14, fontWeight: 700, color: "#fff", background: busy ? C.faint : C.moss, border: "none", borderRadius: 3, padding: "11px 20px", cursor: busy ? "default" : "pointer" }}>{busy ? "Sending…" : "Create contact + deal"}</button>
+    </div>
+  );
+}
+
+function SendToDotloop({ deal, side, inline }) {
+  const [open, setOpen] = useState(false);
+  const [hook, setHook] = useState("");
+  const [hookInput, setHookInput] = useState("");
+  const [loopName, setLoopName] = useState("");
+  const [txType, setTxType] = useState("Purchase");
+  const [clientName, setClientName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [done, setDone] = useState("");
+
+  useEffect(() => {
+    if (open) {
+      setHook(dotloopWebhook());
+      if (!loopName && deal.address) setLoopName(deal.address);
+      const isBuyerSide = /buyer/i.test(side);
+      const n = isBuyerSide ? deal.buyers : deal.sellers;
+      if (n && !clientName) setClientName(n);
+    }
+  }, [open ]);
+
+  const saveHook = () => {
+    const v = hookInput.trim();
+    if (!v.startsWith("https://hooks.zapier.com/")) { setErr("That doesn't look like a Zapier webhook URL — it starts with https://hooks.zapier.com/…."); return; }
+    setDotloopWebhook(v); setHook(v); setHookInput(""); setErr(""); setDone("Webhook saved on this device ✓");
+  };
+  const clearHook = () => { setDotloopWebhook(""); setHook(""); setDone(""); };
+
+  const send = async () => {
+    setErr(""); setDone("");
+    if (!loopName.trim()) return setErr("Give the loop a name — usually the property address.");
+    setBusy(true);
+    try {
+      const payload = {
+        loop_name: loopName.trim(),
+        transaction_type: txType === "Purchase" ? "PURCHASE" : txType === "Lease" ? "LEASE" : "LISTING",
+        status: "PRE_OFFER",
+        property_address: deal.address || "",
+        mls_number: deal.mls || "",
+        list_price: deal.list || "",
+        offer_price: deal.offer || "",
+        earnest_money: deal.earnest || "",
+        financing: deal.financing || "",
+        closing_date: deal.close || "",
+        client_name: clientName.trim() || undefined,
+        client_email: email.trim() || undefined,
+        client_phone: phone.trim() || undefined,
+        client_role: /buyer/i.test(side) ? "BUYER" : "SELLER",
+        source: "CloseAssist",
+      };
+      const r = await fetch(hook, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      if (!r.ok) throw new Error("Zapier returned " + r.status + " — check the webhook URL.");
+      setDone("Sent ✓ — your Zap is creating the loop in dotloop now. Finish it there.");
+    } catch (e) { setErr(e.message || "Couldn't reach the webhook."); } finally { setBusy(false); }
+  };
+
+  if (!open) {
+    return <button onClick={() => setOpen(true)} style={{ marginTop: inline ? 0 : 18, fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: "#fff", background: C.amber, border: "none", borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Send to dotloop ↗</button>;
+  }
+
+  return (
+    <div style={{ marginTop: 20, width: "100%", flexBasis: "100%", border: "1.5px solid " + C.amber, borderRadius: 5, padding: 16, background: "#fff" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+        <span style={{ fontFamily: SER, fontWeight: 700, fontSize: 17, color: C.ink }}>Send to dotloop</span>
+        <button onClick={() => setOpen(false)} style={{ fontFamily: SAN, fontSize: 12, color: C.faint, background: "none", border: "none", cursor: "pointer" }}>close ✕</button>
+      </div>
+      {!hook ? (
+        <div>
+          <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.55, marginTop: 0, marginBottom: 12 }}>One-time setup: create a Zap with a <b>Webhooks by Zapier</b> trigger (Catch Hook) → <b>dotloop</b> → <b>Create Loop</b>, then paste the webhook URL here. It stays on this device.</p>
+          <Field label="Zapier webhook URL"><input style={inputStyle} value={hookInput} onChange={(e) => setHookInput(e.target.value)} placeholder="https://hooks.zapier.com/hooks/catch/…" /></Field>
+          {err && <p style={{ fontFamily: SAN, fontSize: 13, color: C.amberDeep }}>{err}</p>}
+          {done && <p style={{ fontFamily: SAN, fontSize: 13, color: C.moss, fontWeight: 600 }}>{done}</p>}
+          <button onClick={saveHook} style={{ fontFamily: SAN, fontSize: 14, fontWeight: 700, color: "#fff", background: C.amber, border: "none", borderRadius: 3, padding: "11px 20px", cursor: "pointer" }}>Save webhook</button>
+        </div>
+      ) : (
+        <div>
+          <p style={{ fontFamily: SAN, fontSize: 12, color: C.faint, lineHeight: 1.5, marginTop: 0, marginBottom: 14 }}>Creates the loop directly in dotloop via your Zap — no FUB needed. <button onClick={clearHook} style={{ ...miniBtn(C.faint), fontSize: 12, textDecoration: "underline" }}>change webhook</button></p>
+          <Field label="Loop name"><input style={inputStyle} value={loopName} onChange={(e) => setLoopName(e.target.value)} placeholder="123 Oak St, Naperville IL" /></Field>
+          <Field label="Transaction type"><Chips options={["Purchase", "Listing", "Lease"]} value={txType} onChange={setTxType} /></Field>
+          <Field label="Client name"><input style={inputStyle} value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="Client name" /></Field>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 150px" }}><Field label="Client email"><input style={inputStyle} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="client@email.com" /></Field></div>
+            <div style={{ flex: "1 1 130px" }}><Field label="Client phone"><input style={inputStyle} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="555-123-4567" /></Field></div>
+          </div>
+          <p style={{ fontFamily: SAN, fontSize: 12, color: C.faint, lineHeight: 1.5 }}>Deal details (address, MLS #, prices, financing, closing) go automatically from the form above.</p>
+          {err && <p style={{ fontFamily: SAN, fontSize: 13, color: C.amberDeep }}>{err}</p>}
+          {done && <p style={{ fontFamily: SAN, fontSize: 13, color: C.moss, fontWeight: 600 }}>{done}</p>}
+          <button onClick={send} disabled={busy} style={{ fontFamily: SAN, fontSize: 14, fontWeight: 700, color: "#fff", background: busy ? C.faint : C.amber, border: "none", borderRadius: 3, padding: "11px 20px", cursor: busy ? "default" : "pointer" }}>{busy ? "Sending…" : "Create loop in dotloop"}</button>
+        </div>
+      )}
     </div>
   );
 }
