@@ -1842,6 +1842,25 @@ function MuseDrawer({ open, onClose, onKeyChange }) {
   );
 }
 
+function BottomNav({ view, goHome, setDrawer, savedCount, museOn, hasBrand }) {
+  const item = (label, icon, active, onClick, badge, dot) => (
+    <button onClick={onClick} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, background: "transparent", border: "none", cursor: "pointer", padding: "10px 4px calc(10px + env(safe-area-inset-bottom))", color: active ? C.amber : C.faint, fontFamily: SAN, fontSize: 11, fontWeight: 700, position: "relative" }}>
+      <span style={{ fontSize: 21, lineHeight: 1 }}>{icon}</span>
+      {badge > 0 && <span style={{ position: "absolute", top: 4, left: "calc(50% + 6px)", fontSize: 10, fontWeight: 700, color: "#fff", background: C.amber, borderRadius: 999, padding: "1px 6px" }}>{badge}</span>}
+      {dot && <span style={{ position: "absolute", top: 8, left: "calc(50% - 14px)", width: 7, height: 7, borderRadius: 999, background: C.moss }} />}
+      <span>{label}</span>
+    </button>
+  );
+  return (
+    <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 40, background: C.cream, borderTop: "2px solid " + C.ink, display: "flex", padding: "0 6px" }}>
+      {item("Home", "⌂", view.name === "home", goHome, 0, false)}
+      {item("Saved", "★", false, () => setDrawer("saved"), savedCount, false)}
+      {item("Muse", "✨", false, () => setDrawer("muse"), 0, museOn)}
+      {item("Brand", "⚙", false, () => setDrawer("brand"), 0, hasBrand)}
+    </div>
+  );
+}
+
 function App() {
   const [tab, setTab] = useState("follow");
   const [saved, setSaved] = useState([]);
@@ -1893,7 +1912,7 @@ function App() {
   return (
     <ProfileCtx.Provider value={{ profile, setProfile }}>
       <SavedCtx.Provider value={{ saved, add, remove, update }}>
-        <div style={{ minHeight: "100vh", background: C.cream, backgroundImage: "radial-gradient(circle at 12% 15%, rgba(192,57,43,.06), transparent 40%), radial-gradient(circle at 88% 80%, rgba(31,58,95,.06), transparent 45%)", padding: "0 0 60px" }}>
+        <div style={{ minHeight: "100vh", background: C.cream, backgroundImage: "radial-gradient(circle at 12% 15%, rgba(192,57,43,.06), transparent 40%), radial-gradient(circle at 88% 80%, rgba(31,58,95,.06), transparent 45%)", padding: "0 0 96px" }}>
           <div style={{ borderBottom: `2px solid ${C.ink}`, padding: "26px 28px 22px", maxWidth: 820, margin: "0 auto" }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 12, justifyContent: "space-between", flexWrap: "wrap" }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
@@ -1901,11 +1920,7 @@ function App() {
                 <span style={{ fontFamily: SER, fontStyle: "italic", fontSize: 15, color: C.faint }}>your AI sales desk</span>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                {headBtn("⌂ Home", goHome, view.name === "home")}
                 {headBtn(lang === "es" ? "ES ✓" : "EN", toggleLang, lang === "es")}
-                {headBtn(hasBrand ? "⚙ Brand ✓" : "⚙ Brand", () => setDrawer("brand"), hasBrand)}
-                {headBtn("★ Saved" + (saved.length ? " (" + saved.length + ")" : ""), () => setDrawer("saved"), false)}
-                {headBtn(museOn ? "✨ Muse ✓" : "✨ Muse", () => setDrawer("muse"), museOn)}
                 {headBtn("✉ Feedback", sendFeedback, false)}
                 {headBtn("Sign out", signOut, false)}
               </div>
@@ -1950,6 +1965,7 @@ function App() {
         <SavedDrawer open={drawer === "saved"} onClose={() => setDrawer(null)} />
         <ProfileDrawer open={drawer === "brand"} onClose={() => setDrawer(null)} />
         <MuseDrawer open={drawer === "muse"} onClose={() => setDrawer(null)} onKeyChange={setMuseOn} />
+        <BottomNav view={view} goHome={goHome} setDrawer={setDrawer} savedCount={saved.length} museOn={museOn} hasBrand={hasBrand} />
       </SavedCtx.Provider>
     </ProfileCtx.Provider>
   );
