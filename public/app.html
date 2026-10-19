@@ -54,11 +54,16 @@ let TOKEN = "";
 // AI calls go straight from the browser to Anthropic on the user's key.
 function museKey() { try { return (window.localStorage && window.localStorage.getItem("ca-claude-key")) || ""; } catch (e) { return ""; } }
 function setMuseKey(v) { try { if (window.localStorage) { if (v) window.localStorage.setItem("ca-claude-key", v); else window.localStorage.removeItem("ca-claude-key"); } } catch (e) {} }
+// Draft language: "en" or "es". Stored on-device; "es" appends a Spanish instruction to AI prompts.
+function appLang() { try { return window.localStorage.getItem("ca-lang") || "en"; } catch (e) { return "en"; } }
+function setAppLang(v) { try { window.localStorage.setItem("ca-lang", v); } catch (e) {} }
+const ES_INSTRUCT = "\n\nWrite your entire response in Spanish (neutral Latin American Spanish, warm and professional, appropriate for US Hispanic real estate clients). Keep proper names, addresses, and numbers as-is.";
 async function askClaudeDirect(key, system, user) {
+  const sysOut = ((system || "") + (appLang() === "es" ? ES_INSTRUCT : "")).trim();
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1600, system: system || undefined, messages: [{ role: "user", content: user }] }),
+    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1600, system: sysOut || undefined, messages: [{ role: "user", content: user }] }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((data.error && data.error.message) || ("Request failed (" + res.status + ")"));
@@ -83,11 +88,12 @@ async function fubCall(payload) {
 
 async function askClaude(system, user) {
   const own = museKey();
-  if (own) return askClaudeDirect(own, system, user);
+  const sys2 = (system || "") + (appLang() === "es" ? ES_INSTRUCT : "");
+  if (own) return askClaudeDirect(own, sys2, user);
   const res = await fetch(API_GENERATE, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-app-token": TOKEN },
-    body: JSON.stringify({ system, user, max_tokens: 1600 }),
+    body: JSON.stringify({ system: sys2, user, max_tokens: 1600 }),
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) { TOKEN = ""; try { await window.storage.delete("closeassist-token"); } catch {} window.dispatchEvent(new Event("closeassist-logout")); throw new Error("Session expired — please log in again."); }
@@ -1407,7 +1413,7 @@ function OfferCompare() {
     if (usable.length < 2) return setUErr("Need at least two readable PDFs. Scanned files can't be read yet.");
     setBusy(true);
     try {
-      const r = await fetch(API_ANALYZE, { method: "POST", headers: { "Content-Type": "application/json", "x-app-token": TOKEN }, body: JSON.stringify({ offers: usable.map((f) => ({ name: f.name, text: f.text })), priorities }) });
+      const r = await fetch(API_ANALYZE, { method: "POST", headers: { "Content-Type": "application/json", "x-app-token": TOKEN }, body: JSON.stringify({ offers: usable.map((f) => ({ name: f.name, text: f.text })), priorities, lang: appLang() }) });
       const data = await r.json();
       if (r.status === 401) { TOKEN = ""; try { await window.storage.delete("closeassist-token"); } catch {} window.dispatchEvent(new Event("closeassist-logout")); throw new Error("Session expired — please log in again."); }
       if (!r.ok) throw new Error(data.error || "Request failed.");
@@ -1843,6 +1849,8 @@ function App() {
   const [drawer, setDrawer] = useState(null); // 'saved' | 'brand' | 'muse' | null
   const [view, setView] = useState({ name: "home" });
   const [museOn, setMuseOn] = useState(() => { try { return !!(window.localStorage && window.localStorage.getItem("ca-claude-key")); } catch (e) { return false; } });
+  const [lang, setLang] = useState(() => appLang());
+  const toggleLang = () => { const v = lang === "es" ? "en" : "es"; setAppLang(v); setLang(v); };
   const goHome = () => { setView({ name: "home" }); try { window.scrollTo(0, 0); } catch (e) {} };
   const goSection = (gi) => { setView({ name: "section", gi: gi }); try { window.scrollTo(0, 0); } catch (e) {} };
   const goTool = (id) => { setTab(id); setView({ name: "tool" }); try { window.scrollTo(0, 0); } catch (e) {} };
@@ -1894,6 +1902,7 @@ function App() {
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 {headBtn("⌂ Home", goHome, view.name === "home")}
+                {headBtn(lang === "es" ? "ES ✓" : "EN", toggleLang, lang === "es")}
                 {headBtn(hasBrand ? "⚙ Brand ✓" : "⚙ Brand", () => setDrawer("brand"), hasBrand)}
                 {headBtn("★ Saved" + (saved.length ? " (" + saved.length + ")" : ""), () => setDrawer("saved"), false)}
                 {headBtn(museOn ? "✨ Muse ✓" : "✨ Muse", () => setDrawer("muse"), museOn)}
@@ -1930,7 +1939,7 @@ function App() {
             </div>
             <AccentCtx.Provider value={accent}>
             <div style={{ maxWidth: 820, margin: "8px auto 0", padding: 28, background: C.paper, border: "2px solid " + accent, borderRadius: 4 }}>
-              <p style={{ fontFamily: SER, fontStyle: "italic", fontSize: 17, color: accent, marginTop: 0, marginBottom: 22 }}>{meta.sub}</p>
+              <p style={{ fontFamily: SER, fontStyle: "italic", fontSize: 17, color: accent, marginTop: 0, marginBottom: 22 }}>{meta.sub}{lang === "es" && <span style={{ display: "inline-block", fontFamily: SAN, fontStyle: "normal", fontSize: 11, fontWeight: 700, color: "#fff", background: accent, borderRadius: 999, padding: "2px 9px", marginLeft: 10, verticalAlign: "middle" }}>ESPAÑOL</span>}</p>
               <Active />
             </div>
             </AccentCtx.Provider>

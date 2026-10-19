@@ -53,7 +53,8 @@ export default async function handler(req, res) {
 
   try {
     const data = typeof req.body === "string" ? JSON.parse(req.body) : (req.body || {});
-    const { offers, priorities } = data;
+    const { offers, priorities, lang } = data;
+    const langInstruct = lang === "es" ? "\n\nWrite your entire response in Spanish (neutral Latin American Spanish, warm and professional, appropriate for US Hispanic real estate clients). Keep proper names, addresses, and numbers as-is." : "";
 
     if (!Array.isArray(offers)) return res.status(400).json({ error: "Send an 'offers' array." });
 
@@ -80,7 +81,7 @@ export default async function handler(req, res) {
     const msg = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 2200,
-      system: SYSTEM,
+      system: SYSTEM + langInstruct,
       messages: [{ role: "user", content: body }],
     });
 
