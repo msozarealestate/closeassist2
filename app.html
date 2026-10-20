@@ -8,6 +8,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.4/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -1169,7 +1170,80 @@ function OfferBuilder() {
       <CopyDealData deal={d} side={side} />
       <SendToFub deal={d} side={side} inline />
       <SendToDotloop deal={d} side={side} inline />
+      <FillContract80 deal={d} side={side} />
     </div>
+  </div>);
+}
+
+// Fills the official Multi-Board Residential Real Estate Contract 8.0 PDF
+// (served base64-encoded at /forms/multiboard-80.b64.txt, decoded in-browser)
+// with the Offer Builder deal terms and downloads it. Field numbers are the
+// form's own AcroForm field names, mapped Oct 2026 against the official
+// Feb 2025 form.
+function FillContract80({ deal, side }) {
+  const { profile } = useContext(ProfileCtx);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const fill = async () => {
+    if (!deal.address.trim() || !deal.offer.trim()) { setMsg("Add the property address and offer price above first."); return; }
+    if (!window.PDFLib) { setMsg("The PDF tool is still loading — give it a few seconds and try again."); return; }
+    setBusy(true); setMsg("");
+    try {
+      const res = await fetch("/forms/multiboard-80.b64.txt");
+      if (!res.ok) throw new Error("form fetch failed");
+      const b64 = (await res.text()).replace(/\s+/g, "");
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const pdf = await window.PDFLib.PDFDocument.load(bytes);
+      const form = pdf.getForm();
+      const num = (v) => { const n = Number(String(v == null ? "" : v).replace(/[^0-9.]/g, "")); return isFinite(n) ? n : 0; };
+      const money = (v) => { const n = num(v); return n ? n.toLocaleString("en-US") : ""; };
+      const setT = (name, val) => { if (val == null || String(val).trim() === "") return; try { form.getTextField(name).setText(String(val)); } catch (e) {} };
+      // Parties + property (Para 1-2) and the address footer on every page
+      setT("1", deal.buyers); setT("2", deal.sellers);
+      setT("5", deal.address); setT("Address", deal.address);
+      // Para 3: price, seller credit, earnest money + timing
+      setT("24", money(deal.offer));
+      setT("25", money(deal.credit));
+      setT("26", money(deal.earnest)); setT("27", deal.earnestDays);
+      // Para 5: closing date — "October 30" + 2-digit year in the ", 20__" blank
+      if (deal.close) {
+        let dt = new Date(deal.close + "T12:00:00");
+        if (isNaN(dt.getTime())) dt = new Date(deal.close);
+        if (!isNaN(dt.getTime())) { setT("44", dt.toLocaleDateString("en-US", { month: "long", day: "numeric" })); setT("45", String(dt.getFullYear()).slice(2)); }
+      }
+      // Para 4: seller contribution to buyer brokerage comp — % or flat $
+      const bc = String(deal.buyerComp || "");
+      if (bc.includes("%")) { try { form.getRadioGroup("37").select("Percent"); } catch (e) {} setT("38", bc.replace(/[^0-9.]/g, "")); }
+      else if (num(bc)) { try { form.getRadioGroup("37").select("Amount"); } catch (e) {} setT("39", money(bc)); }
+      // Para 8a: financing type (Cash leaves 8a blank — no mortgage contingency)
+      const finMap = { Conventional: "Choice1", FHA: "Choice2", VA: "Choice3", USDA: "Choice4" };
+      if (finMap[deal.financing]) { try { form.getRadioGroup("112").select(finMap[deal.financing]); } catch (e) {} }
+      // Para 37 addendum list: Appraisal Addendum
+      if (deal.apprAddendum === "Yes") { try { form.getCheckBox("289").check(); } catch (e) {} }
+      // Signature page: printed names + date of offer
+      setT("317", deal.buyers); setT("346", deal.sellers);
+      setT("314", new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }));
+      // "For information only": the agent's own brokerage block, from Brand
+      if (profile) {
+        if (String(side).indexOf("Buyer") === 0) { setT("322", profile.brokerage); setT("329", profile.name); }
+        else { setT("351", profile.brokerage); setT("358", profile.name); }
+      }
+      const out = await pdf.save();
+      const url = URL.createObjectURL(new Blob([out], { type: "application/pdf" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "Multi-Board-8.0-" + deal.address.trim().replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "") + ".pdf";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      setMsg("Contract downloaded with the deal details filled in. Review every paragraph before sending — initials, escrowee, loan terms, and optional paragraphs (31/33/35) are completed in the PDF itself.");
+    } catch (e) { setMsg("Couldn't build the contract PDF — check your connection and try again."); }
+    setBusy(false);
+  };
+  return (<div style={{ flex: "1 1 230px", maxWidth: 360 }}>
+    <button onClick={fill} disabled={busy} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: "#fff", background: C.amber, border: "none", borderRadius: 12, padding: "11px 18px", cursor: busy ? "wait" : "pointer", width: "100%" }}>{busy ? "Filling the 8.0…" : "📄 Fill the 8.0 Contract"}</button>
+    {msg && <div style={{ fontFamily: SAN, fontSize: 12, color: C.faint, lineHeight: 1.5, marginTop: 8 }}>{msg}</div>}
   </div>);
 }
 
