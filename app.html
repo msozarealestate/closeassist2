@@ -208,6 +208,36 @@ function RunButton({ onClick, loading, children }) {
   return <button onClick={onClick} disabled={loading} style={{ fontFamily: SAN, fontSize: 15, fontWeight: 700, letterSpacing: 0.4, color: C.cream, background: loading ? C.faint : accent, border: "none", borderRadius: 2, padding: "13px 26px", cursor: loading ? "default" : "pointer", boxShadow: loading ? "none" : `4px 4px 0 ${C.ink}` }}>{loading ? "thinking…" : children}</button>;
 }
 
+function LogNotePanel({ text, noun }) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [done, setDone] = useState("");
+  const send = async () => {
+    setErr(""); setDone("");
+    if (!name.trim() && !email.trim() && !phone.trim()) return setErr("Add at least a name, email, or phone.");
+    setBusy(true);
+    try {
+      await fubCall({ action: "note", name: name.trim() || undefined, email: email.trim() || undefined, phone: phone.trim() || undefined, subject: "CloseAssist draft — " + noun, body: text });
+      setDone("Logged in FUB \u2713");
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <div style={{ marginTop: 12, borderTop: "1px solid " + C.line, paddingTop: 12 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+        <input style={{ ...inputStyle, flex: "1 1 110px", fontSize: 13 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="Contact name" />
+        <input style={{ ...inputStyle, flex: "1 1 130px", fontSize: 13 }} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" />
+        <input style={{ ...inputStyle, flex: "1 1 100px", fontSize: 13 }} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone" />
+      </div>
+      {err && <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.amberDeep, margin: "0 0 8px" }}>{err}</p>}
+      {done && <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.moss, fontWeight: 600, margin: "0 0 8px" }}>{done}</p>}
+      <button onClick={send} disabled={busy} style={{ fontFamily: SAN, fontSize: 12.5, fontWeight: 700, color: "#fff", background: busy ? C.faint : C.moss, border: "none", borderRadius: 2, padding: "8px 14px", cursor: busy ? "default" : "pointer" }}>{busy ? "Logging\u2026" : "Log this draft in FUB"}</button>
+    </div>
+  );
+}
+
 function Card({ text, index, noun, onRefine }) {
   const { add } = useContext(SavedCtx);
   const accent = useContext(AccentCtx);
@@ -215,6 +245,7 @@ function Card({ text, index, noun, onRefine }) {
   const [open, setOpen] = useState(false);
   const [instr, setInstr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [fubOpen, setFubOpen] = useState(false);
   const doSave = () => { add({ text, noun }); setSaved(true); setTimeout(() => setSaved(false), 1400); };
   const doRefine = async () => { if (!instr.trim()) return; setBusy(true); try { await onRefine(index, instr); setInstr(""); setOpen(false); } finally { setBusy(false); } };
   return (
@@ -225,6 +256,7 @@ function Card({ text, index, noun, onRefine }) {
           <CopyBtn text={text} />
           <button onClick={doSave} style={miniBtn(saved ? C.moss : C.faint)}>{saved ? "saved ★" : "save ☆"}</button>
           <button onClick={() => setOpen((o) => !o)} style={miniBtn(open ? C.amberDeep : C.faint)}>refine</button>
+          <button onClick={() => setFubOpen((o) => !o)} style={miniBtn(fubOpen ? C.amberDeep : C.faint)}>FUB\u2197</button>
         </div>
       </div>
       <p style={{ fontFamily: SAN, fontSize: 15, lineHeight: 1.55, color: C.ink, whiteSpace: "pre-wrap", margin: 0 }}>{busy ? "reworking…" : text}</p>
@@ -234,6 +266,7 @@ function Card({ text, index, noun, onRefine }) {
           <button onClick={doRefine} disabled={busy} style={{ fontFamily: SAN, fontSize: 13, fontWeight: 700, color: C.cream, background: busy ? C.faint : C.ink, border: "none", borderRadius: 2, padding: "0 16px", cursor: busy ? "default" : "pointer" }}>{busy ? "…" : "regenerate"}</button>
         </div>
       )}
+      {fubOpen && <LogNotePanel text={text} noun={noun} />}
     </div>
   );
 }
@@ -568,6 +601,50 @@ function ConsultPrep() {
   </div>);
 }
 
+function DeadlineFub({ milestones, addr }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [done, setDone] = useState("");
+  const send = async () => {
+    setErr(""); setDone(""); setBusy(true);
+    try {
+      for (const m of milestones) {
+        await fubCall({
+          action: "task",
+          name: name.trim() || undefined,
+          email: email.trim() || undefined,
+          title: m.label + (addr ? " — " + addr : ""),
+          dueDate: ymd(m.date),
+          notes: m.note,
+        });
+      }
+      setDone("Created " + milestones.length + " tasks in FUB \u2713");
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  if (!open) {
+    return <button onClick={() => setOpen(true)} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: "#fff", background: C.moss, border: "none", borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Send to FUB as tasks</button>;
+  }
+  return (
+    <div style={{ marginTop: 16, width: "100%", border: "1.5px solid " + C.moss, borderRadius: 5, padding: 16, background: "#fff" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+        <span style={{ fontFamily: SER, fontWeight: 700, fontSize: 17, color: C.ink }}>Deadlines → FUB tasks</span>
+        <button onClick={() => setOpen(false)} style={{ fontFamily: SAN, fontSize: 12, color: C.faint, background: "none", border: "none", cursor: "pointer" }}>close \u2715</button>
+      </div>
+      <p style={{ fontFamily: SAN, fontSize: 12, color: C.faint, lineHeight: 1.5, marginTop: 0, marginBottom: 12 }}>Creates one task per deadline{milestones.length ? (" (" + milestones.length + ")") : ""}, each with its due date. Attach to a contact (optional).</p>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+        <input style={{ ...inputStyle, flex: "1 1 140px", fontSize: 13 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="Contact name (optional)" />
+        <input style={{ ...inputStyle, flex: "1 1 160px", fontSize: 13 }} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email (optional)" />
+      </div>
+      {err && <p style={{ fontFamily: SAN, fontSize: 13, color: C.amberDeep }}>{err}</p>}
+      {done && <p style={{ fontFamily: SAN, fontSize: 13, color: C.moss, fontWeight: 600 }}>{done}</p>}
+      <button onClick={send} disabled={busy} style={{ fontFamily: SAN, fontSize: 14, fontWeight: 700, color: "#fff", background: busy ? C.faint : C.moss, border: "none", borderRadius: 3, padding: "11px 20px", cursor: busy ? "default" : "pointer" }}>{busy ? "Creating\u2026" : "Create " + milestones.length + " tasks"}</button>
+    </div>
+  );
+}
+
 function DeadlineTracker() {
   const [accept, setAccept] = useState("");
   const [closing, setClosing] = useState("");
@@ -633,6 +710,7 @@ function DeadlineTracker() {
       <button onClick={exportCal} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: "#fff", background: C.moss, border: "none", borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Add deadlines to calendar</button>
       <button onClick={copyText} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: C.ink, background: "transparent", border: `1.5px solid ${C.ink}`, borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Copy</button>
     </div>}
+    {milestones.length > 0 && <DeadlineFub milestones={milestones} addr={addr} />}
   </div>);
 }
 
