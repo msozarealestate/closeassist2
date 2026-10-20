@@ -1129,7 +1129,7 @@ function OfferBuilder() {
   const third = { flex: "1 1 120px" };
   return (<div>
     <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 12, padding: "11px 14px", marginBottom: 18 }}>
-      <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Enter the deal once — get a copy-ready deal sheet for dotloop, plain-English contingency notes, a cover note to the other agent, and a client explanation. Tuned to the Multi-Board 8.0. It organizes YOUR decisions; it doesn't fill the official form or give legal advice.</p>
+      <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Enter the deal once — get a copy-ready deal sheet for dotloop, plain-English contingency notes, a cover note to the other agent, and a client explanation. Then fill the actual paperwork: the official Multi-Board 8.0 contract and CAR's buyer rep agreement, completed from these same deal terms and downloaded as PDFs. It organizes YOUR decisions — review every paragraph before sending; this isn't legal advice.</p>
     </div>
 
     <Field label="Which side are you on?"><Chips options={["Buyer side (writing)", "Seller side (reviewing/countering)"]} value={side} onChange={setSide} /></Field>
@@ -1906,7 +1906,7 @@ const GROUPS = [
     { id: "prep", label: "Consult Prep", sub: "Talking points, questions & objections before you pitch.", el: ConsultPrep },
   ] },
   { name: "Contracts & Signing", color: "#b5446e", tabs: [
-    { id: "offerbuild", label: "Offer Builder", sub: "Enter the deal once — deal sheet, contingency notes, cover note & client explainer.", el: OfferBuilder },
+    { id: "offerbuild", label: "Offer Builder", sub: "Enter the deal once — deal sheet, cover note, client explainer, plus the filled 8.0 contract & buyer rep agreement.", el: OfferBuilder },
     { id: "quick", label: "Quick Offer", sub: "Set your buyer once, then one offer per property — address + price.", el: QuickOffer },
     { id: "contract", label: "Contract Prep", sub: "Fill your terms into a clean draft with signature blocks ready for e-sign.", el: ContractPrep },
     { id: "compare", label: "Offer Compare", sub: "Paste competing offers — get them ranked with a pick to present.", el: OfferCompare },
@@ -2150,6 +2150,7 @@ function HomeView({ profile, goSection, setDrawer }) {
         <div style={tourCard}><span style={tourTitle}>Your Brand, everywhere</span><p style={tourText}>Set your name, brokerage and voice once — it flows into every draft automatically.</p><button onClick={() => setDrawer("brand")} style={{ ...miniBtn(C.amber), fontSize: 12.5 }}>Set up Brand →</button></div>
         <div style={tourCard}><span style={tourTitle}>Saved &amp; scheduled</span><p style={tourText}>Collect drafts, spread them across your week, and drop them into your calendar.</p><button onClick={() => setDrawer("saved")} style={{ ...miniBtn(C.amber), fontSize: 12.5 }}>Open Saved →</button></div>
         <div style={tourCard}><span style={tourTitle}>Numbers you can trust</span><p style={tourText}>Seller net sheets and commission statements with Illinois transfer taxes baked in.</p></div>
+        <div style={tourCard}><span style={tourTitle}>Real contracts, filled in</span><p style={tourText}>Offer Builder completes the official Multi-Board 8.0 contract and CAR's buyer rep agreement from the deal you entered — download, review, send.</p></div>
         <div style={tourCard}><span style={tourTitle}>Your key, unlimited drafts</span><p style={tourText}>The 27 workflows can run on your own Muse key — same tools, unlimited drafts, your usage, your control.</p><button onClick={() => setDrawer("muse")} style={{ ...miniBtn(C.amber), fontSize: 12.5 }}>Connect →</button></div>
       </div>
     </div>
