@@ -57,6 +57,24 @@ function setMuseKey(v) { try { if (window.localStorage) { if (v) window.localSto
 // Zapier webhook for direct "Send to dotloop" (Catch Hook -> dotloop Create Loop). On-device only.
 function dotloopWebhook() { try { return window.localStorage.getItem("ca-zapier-dotloop") || ""; } catch (e) { return ""; } }
 function setDotloopWebhook(v) { try { if (v) window.localStorage.setItem("ca-zapier-dotloop", v); else window.localStorage.removeItem("ca-zapier-dotloop"); } catch (e) {} }
+// Free-tier usage cap: FREE_CAP AI uses/month on the shared backend key (on-device counter).
+const FREE_CAP = 50;
+function usageInfo() {
+  const d = new Date();
+  const k = "ca-use-" + d.getFullYear() + "-" + (d.getMonth() + 1);
+  let n = 0;
+  try { n = parseInt(window.localStorage.getItem(k) || "0", 10) || 0; } catch (e) {}
+  const rd = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+  let resetLabel = "";
+  try { resetLabel = rd.toLocaleDateString("en-US", { month: "short", day: "numeric" }); } catch (e) { resetLabel = "next month"; }
+  return { n, k, resetLabel };
+}
+function bumpUsage() {
+  const u = usageInfo();
+  try { window.localStorage.setItem(u.k, String(u.n + 1)); } catch (e) {}
+  return u.n + 1;
+}
+function capError() { return new Error("You've used your " + FREE_CAP + " free AI uses this month — connect your own Muse key for unlimited drafts (tap \u2728 Muse below)."); }
 // Best-effort split of "123 Oak St, Naperville IL 60540" for dotloop Autofill.
 function parseAddress(a) {
   const out = { street: "", city: "", state: "", zip: "" };
@@ -102,6 +120,7 @@ async function askClaude(system, user) {
   const own = museKey();
   const sys2 = (system || "") + (appLang() === "es" ? ES_INSTRUCT : "");
   if (own) return askClaudeDirect(own, sys2, user);
+  if (usageInfo().n >= FREE_CAP) throw capError();
   const res = await fetch(API_GENERATE, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-app-token": TOKEN },
@@ -110,6 +129,7 @@ async function askClaude(system, user) {
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) { TOKEN = ""; try { await window.storage.delete("closeassist-token"); } catch {} window.dispatchEvent(new Event("closeassist-logout")); throw new Error("Session expired — please log in again."); }
   if (!res.ok) throw new Error(data.error || ("Request failed (" + res.status + ")"));
+  bumpUsage();
   return (data.text || "").trim();
 }
 
@@ -1529,10 +1549,12 @@ function OfferCompare() {
     if (usable.length < 2) return setUErr("Need at least two readable PDFs. Scanned files can't be read yet.");
     setBusy(true);
     try {
+      if (usageInfo().n >= FREE_CAP) throw capError();
       const r = await fetch(API_ANALYZE, { method: "POST", headers: { "Content-Type": "application/json", "x-app-token": TOKEN }, body: JSON.stringify({ offers: usable.map((f) => ({ name: f.name, text: f.text })), priorities, lang: appLang() }) });
       const data = await r.json();
       if (r.status === 401) { TOKEN = ""; try { await window.storage.delete("closeassist-token"); } catch {} window.dispatchEvent(new Event("closeassist-logout")); throw new Error("Session expired — please log in again."); }
       if (!r.ok) throw new Error(data.error || "Request failed.");
+      bumpUsage();
       setUOut(data.analysis);
     } catch (e) { setUErr(e.message); } finally { setBusy(false); }
   };
@@ -1885,7 +1907,7 @@ function HomeView({ profile, goSection, setDrawer }) {
         <div style={tourCard}><span style={tourTitle}>Your Brand, everywhere</span><p style={tourText}>Set your name, brokerage and voice once — it flows into every draft automatically.</p><button onClick={() => setDrawer("brand")} style={{ ...miniBtn(C.amber), fontSize: 12.5 }}>Set up Brand →</button></div>
         <div style={tourCard}><span style={tourTitle}>Saved &amp; scheduled</span><p style={tourText}>Collect drafts, spread them across your week, and drop them into your calendar.</p><button onClick={() => setDrawer("saved")} style={{ ...miniBtn(C.amber), fontSize: 12.5 }}>Open Saved →</button></div>
         <div style={tourCard}><span style={tourTitle}>Numbers you can trust</span><p style={tourText}>Seller net sheets and commission statements with Illinois transfer taxes baked in.</p></div>
-        <div style={tourCard}><span style={tourTitle}>✨ Powered by Muse</span><p style={tourText}>Connect your own Muse API key and your drafts run on your account, your usage.</p><button onClick={() => setDrawer("muse")} style={{ ...miniBtn(C.amber), fontSize: 12.5 }}>Connect →</button></div>
+        <div style={tourCard}><span style={tourTitle}>Your key, unlimited drafts</span><p style={tourText}>The 27 workflows can run on your own Muse key — same tools, unlimited drafts, your usage, your control.</p><button onClick={() => setDrawer("muse")} style={{ ...miniBtn(C.amber), fontSize: 12.5 }}>Connect →</button></div>
       </div>
     </div>
   );
@@ -1919,7 +1941,8 @@ function MuseDrawer({ open, onClose, onKeyChange }) {
   const [tail, setTail] = useState("");
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
-  useEffect(() => { if (open) { const k = museKey(); setHasKey(!!k); setTail(k ? k.slice(-4) : ""); setKey(""); setMsg(""); setErr(""); } }, [open ]);
+  const [use, setUse] = useState({ n: 0, resetLabel: "" });
+  useEffect(() => { if (open) { const k = museKey(); setHasKey(!!k); setTail(k ? k.slice(-4) : ""); setKey(""); setMsg(""); setErr(""); setUse(usageInfo()); } }, [open ]);
   if (!open) return null;
   const connect = () => {
     const v = key.trim();
@@ -1934,10 +1957,22 @@ function MuseDrawer({ open, onClose, onKeyChange }) {
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(28,24,21,.4)" }} />
       <div style={{ position: "relative", width: "min(440px, 94vw)", height: "100%", background: C.cream, borderLeft: "2px solid " + C.ink, overflowY: "auto", padding: "24px 22px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-          <span style={{ fontFamily: SER, fontWeight: 700, fontSize: 22, color: C.ink }}>✨ Powered by Muse</span>
+          <span style={{ fontFamily: SER, fontWeight: 700, fontSize: 22, color: C.ink }}>✨ Muse</span>
           <button onClick={onClose} style={miniBtn(C.faint)}>close ✕</button>
         </div>
-        <p style={{ fontFamily: SAN, fontSize: 13.5, color: C.faint, lineHeight: 1.6, marginTop: 0 }}>CloseAssist's AI runs on Muse. Connect your own Anthropic API key and your drafts are generated on <b style={{ color: C.ink }}>your</b> key — your usage, your account, same tools.</p>
+        <p style={{ fontFamily: SAN, fontSize: 13.5, color: C.faint, lineHeight: 1.6, marginTop: 0 }}>CloseAssist's 27 workflows run on Muse under the hood. You get {FREE_CAP} free AI uses a month on the shared backend — or connect your own key for unlimited.</p>
+        {!hasKey && (
+          <div style={{ background: "#fff", border: "1.5px solid " + C.line, borderRadius: 5, padding: 14, marginBottom: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+              <span style={{ fontFamily: SAN, fontSize: 13, fontWeight: 700, color: C.ink }}>Free AI uses</span>
+              <span style={{ fontFamily: SAN, fontSize: 13, color: use.n >= FREE_CAP ? C.amberDeep : C.faint }}>{use.n} / {FREE_CAP}</span>
+            </div>
+            <div style={{ height: 8, borderRadius: 999, background: C.line, overflow: "hidden" }}>
+              <div style={{ width: Math.min(100, (use.n / FREE_CAP) * 100) + "%", height: "100%", background: use.n >= FREE_CAP ? C.amberDeep : C.moss }} />
+            </div>
+            <p style={{ fontFamily: SAN, fontSize: 12, color: C.faint, lineHeight: 1.5, margin: "8px 0 0" }}>{use.n >= FREE_CAP ? "Limit reached — connect your key below for unlimited drafts." : "Resets " + use.resetLabel + ". Your key below = unlimited."}</p>
+          </div>
+        )}
         {hasKey ? (
           <div>
             <p style={{ fontFamily: SAN, fontSize: 14, color: C.moss, fontWeight: 700 }}>✓ Connected <span style={{ fontWeight: 400, color: C.faint }}>(key ending …{tail})</span></p>
