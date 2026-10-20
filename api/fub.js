@@ -78,15 +78,8 @@ export default async function handler(req, res) {
 
   const action = body.action || "deal";
 
-  // The public lead-capture form posts { action: "lead" } with no login token.
-  // That's allowed (it can only create a lead). Everything else requires the app token.
-  if (action !== "lead") {
-    const secret = process.env.APP_SECRET;
-    if (secret) {
-      const ok = req.headers["x-app-key"] === secret || verify(secret, req.headers["x-app-token"]);
-      if (!ok) return res.status(401).json({ error: "Unauthorized." });
-    }
-  }
+  // NOTE: auth removed for the open tester rollout (2026-10-19).
+  // All actions (including FUB writes) are open to anyone with the URL.
   if (!process.env.FUB_API_KEY) {
     return res.status(500).json({ error: "Server missing FUB_API_KEY. Add it in Vercel and redeploy." });
   }

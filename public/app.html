@@ -2136,7 +2136,7 @@ function App() {
   const headBtn = (label, onClick, filled) => <button onClick={onClick} style={{ fontFamily: SAN, fontSize: 13, fontWeight: 700, color: filled ? C.cream : C.ink, background: filled ? C.ink : "transparent", border: `1.5px solid ${C.ink}`, borderRadius: 999, padding: "7px 15px", cursor: "pointer" }}>{label}</button>;
 
   if (!authChecked) return <div style={{ minHeight: "100vh", background: C.cream }} />;
-  if (!authed) return <LoginScreen onSuccess={() => setAuthed(true)} />;
+  // Open tester rollout (2026-10-19): no login gate. LoginScreen kept in code for possible re-use.
 
   return (
     <ProfileCtx.Provider value={{ profile, setProfile }}>
@@ -2151,7 +2151,6 @@ function App() {
               <div style={{ display: "flex", gap: 8 }}>
                 {headBtn(lang === "es" ? "ES ✓" : "EN", toggleLang, lang === "es")}
                 {headBtn("✉ Feedback", sendFeedback, false)}
-                {headBtn("Sign out", signOut, false)}
               </div>
             </div>
             <p style={{ fontFamily: SAN, fontSize: 13.5, color: C.faint, marginTop: 6, maxWidth: 540, lineHeight: 1.5 }}>Follow up faster, handle objections cleaner, post more often — without the blank-page grind.</p>

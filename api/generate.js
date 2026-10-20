@@ -20,13 +20,8 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Use POST." });
 
-  const _secret = process.env.APP_SECRET;
-  if (_secret) {
-    const _key = req.headers["x-app-key"];
-    const _tok = req.headers["x-app-token"];
-    const _ok = _key === _secret || verify(_secret, _tok);
-    if (!_ok) return res.status(401).json({ error: "Unauthorized." });
-  }
+  // NOTE: auth removed for the open tester rollout (2026-10-19).
+  // Anyone with the URL can use this endpoint on the owner's key.
   if (!process.env.ANTHROPIC_API_KEY) {
     return res.status(500).json({ error: "Server missing ANTHROPIC_API_KEY." });
   }
