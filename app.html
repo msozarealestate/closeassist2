@@ -31,17 +31,17 @@ const { useState, useRef, useEffect, useContext, createContext } = React;
 // ─────────────────────────────────────────────────────────────
 
 const FONTS = `
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,ital,wght@9..144,0,400;9..144,0,500;9..144,0,600;9..144,0,700;9..144,1,400;9..144,1,500&family=Hanken+Grotesk:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,ital,wght@9..144,0,400;9..144,0,500;9..144,0,600;9..144,0,700;9..144,1,400;9..144,1,500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
 `;
 
-const C = { ink: "#16243a", cream: "#ffffff", paper: "#f4f6f8", amber: "#c0392b", amberDeep: "#902519", moss: "#1f3a5f", line: "#d9dee5", faint: "#697586" };
-const SAN = "'Hanken Grotesk', sans-serif";
+const C = { ink: "#2b2622", cream: "#ffffff", paper: "#faf6ef", amber: "#e0703c", amberDeep: "#b34d24", moss: "#0e7c66", line: "#e9dfd0", faint: "#9c8d7c" };
+const SAN = "'DM Sans', sans-serif";
 const SER = "'Fraunces', serif";
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 const SavedCtx = createContext({ saved: [], add: () => {}, remove: () => {}, update: () => {} });
 const ProfileCtx = createContext({ profile: {}, setProfile: () => {} });
-const AccentCtx = createContext("#c0392b"); // current group accent
+const AccentCtx = createContext("#e0703c"); // current group accent
 
 // Same-origin API (the app is served from the same Vercel project as /api/*).
 const API_GENERATE = "/api/generate";
@@ -190,7 +190,7 @@ function Field({ label, children }) {
   );
 }
 
-const inputStyle = { width: "100%", boxSizing: "border-box", fontFamily: SAN, fontSize: 15, color: C.ink, background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 2, padding: "11px 13px", outline: "none", resize: "vertical" };
+const inputStyle = { width: "100%", boxSizing: "border-box", fontFamily: SAN, fontSize: 15, color: C.ink, background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 12, padding: "11px 13px", outline: "none", resize: "vertical" };
 
 function Chips({ options, value, onChange }) {
   return (
@@ -205,7 +205,7 @@ function Chips({ options, value, onChange }) {
 
 function RunButton({ onClick, loading, children }) {
   const accent = useContext(AccentCtx);
-  return <button onClick={onClick} disabled={loading} style={{ fontFamily: SAN, fontSize: 15, fontWeight: 700, letterSpacing: 0.4, color: C.cream, background: loading ? C.faint : accent, border: "none", borderRadius: 2, padding: "13px 26px", cursor: loading ? "default" : "pointer", boxShadow: loading ? "none" : `4px 4px 0 ${C.ink}` }}>{loading ? "thinking…" : children}</button>;
+  return <button onClick={onClick} disabled={loading} style={{ fontFamily: SAN, fontSize: 15, fontWeight: 700, letterSpacing: 0.4, color: C.cream, background: loading ? C.faint : accent, border: "none", borderRadius: 12, padding: "13px 26px", cursor: loading ? "default" : "pointer", boxShadow: loading ? "none" : "0 3px 10px rgba(43,38,34,.22)" }}>{loading ? "thinking…" : children}</button>;
 }
 
 function LogNotePanel({ text, noun }) {
@@ -233,7 +233,7 @@ function LogNotePanel({ text, noun }) {
       </div>
       {err && <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.amberDeep, margin: "0 0 8px" }}>{err}</p>}
       {done && <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.moss, fontWeight: 600, margin: "0 0 8px" }}>{done}</p>}
-      <button onClick={send} disabled={busy} style={{ fontFamily: SAN, fontSize: 12.5, fontWeight: 700, color: "#fff", background: busy ? C.faint : C.moss, border: "none", borderRadius: 2, padding: "8px 14px", cursor: busy ? "default" : "pointer" }}>{busy ? "Logging\u2026" : "Log this draft in FUB"}</button>
+      <button onClick={send} disabled={busy} style={{ fontFamily: SAN, fontSize: 12.5, fontWeight: 700, color: "#fff", background: busy ? C.faint : C.moss, border: "none", borderRadius: 12, padding: "8px 14px", cursor: busy ? "default" : "pointer" }}>{busy ? "Logging\u2026" : "Log this draft in FUB"}</button>
     </div>
   );
 }
@@ -249,7 +249,7 @@ function Card({ text, index, noun, onRefine }) {
   const doSave = () => { add({ text, noun }); setSaved(true); setTimeout(() => setSaved(false), 1400); };
   const doRefine = async () => { if (!instr.trim()) return; setBusy(true); try { await onRefine(index, instr); setInstr(""); setOpen(false); } finally { setBusy(false); } };
   return (
-    <div style={{ background: C.paper, border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${accent}`, borderRadius: 2, padding: "16px 18px", animation: `rise .4s ${index * 0.06}s both` }}>
+    <div style={{ background: C.paper, border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${accent}`, borderRadius: 12, padding: "16px 18px", animation: `rise .4s ${index * 0.06}s both` }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <span style={{ fontFamily: SER, fontStyle: "italic", fontSize: 14, color: accent }}>{noun} {index + 1}</span>
         <div style={{ display: "flex", gap: 14 }}>
@@ -263,7 +263,7 @@ function Card({ text, index, noun, onRefine }) {
       {open && (
         <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
           <input style={{ ...inputStyle, flex: 1, minWidth: 200, fontSize: 14 }} value={instr} onChange={(e) => setInstr(e.target.value)} placeholder="e.g. shorter, warmer, add the price, drop the emoji…" onKeyDown={(e) => e.key === "Enter" && doRefine()} />
-          <button onClick={doRefine} disabled={busy} style={{ fontFamily: SAN, fontSize: 13, fontWeight: 700, color: C.cream, background: busy ? C.faint : C.ink, border: "none", borderRadius: 2, padding: "0 16px", cursor: busy ? "default" : "pointer" }}>{busy ? "…" : "regenerate"}</button>
+          <button onClick={doRefine} disabled={busy} style={{ fontFamily: SAN, fontSize: 13, fontWeight: 700, color: C.cream, background: busy ? C.faint : C.ink, border: "none", borderRadius: 12, padding: "0 16px", cursor: busy ? "default" : "pointer" }}>{busy ? "…" : "regenerate"}</button>
         </div>
       )}
       {fubOpen && <LogNotePanel text={text} noun={noun} />}
@@ -487,7 +487,7 @@ function ListingPresentation() {
     t.generate(LISTPRES_SYSTEM, facts);
   };
   return (<div>
-    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "11px 14px", marginBottom: 18 }}>
+    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 12, padding: "11px 14px", marginBottom: 18 }}>
       <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Turn your notes into a structured listing presentation you can deliver or send — pricing story, marketing plan, your value, and next steps. Edit and make it yours before presenting.</p>
     </div>
     <Field label="Property address"><input style={inputStyle} value={d.address} onChange={(e) => set("address", e.target.value)} placeholder="123 Oak St, Naperville IL" /></Field>
@@ -523,7 +523,7 @@ function CMABuilder() {
   };
 
   return (<div>
-    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "11px 14px", marginBottom: 18 }}>
+    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 12, padding: "11px 14px", marginBottom: 18 }}>
       <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>You bring the comps from your MLS (that keeps it accurate and within your MLS rules) — CloseAssist does the comparison, a suggested price range, strategy, and a client-ready writeup. Not an appraisal; your professional judgment decides the number.</p>
     </div>
 
@@ -625,10 +625,10 @@ function DeadlineFub({ milestones, addr }) {
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
   if (!open) {
-    return <button onClick={() => setOpen(true)} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: "#fff", background: C.moss, border: "none", borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Send to FUB as tasks</button>;
+    return <button onClick={() => setOpen(true)} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: "#fff", background: C.moss, border: "none", borderRadius: 12, padding: "11px 18px", cursor: "pointer" }}>Send to FUB as tasks</button>;
   }
   return (
-    <div style={{ marginTop: 16, width: "100%", border: "1.5px solid " + C.moss, borderRadius: 5, padding: 16, background: "#fff" }}>
+    <div style={{ marginTop: 16, width: "100%", border: "1.5px solid " + C.moss, borderRadius: 16, padding: 16, background: "#fff" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
         <span style={{ fontFamily: SER, fontWeight: 700, fontSize: 17, color: C.ink }}>Deadlines → FUB tasks</span>
         <button onClick={() => setOpen(false)} style={{ fontFamily: SAN, fontSize: 12, color: C.faint, background: "none", border: "none", cursor: "pointer" }}>close \u2715</button>
@@ -640,7 +640,7 @@ function DeadlineFub({ milestones, addr }) {
       </div>
       {err && <p style={{ fontFamily: SAN, fontSize: 13, color: C.amberDeep }}>{err}</p>}
       {done && <p style={{ fontFamily: SAN, fontSize: 13, color: C.moss, fontWeight: 600 }}>{done}</p>}
-      <button onClick={send} disabled={busy} style={{ fontFamily: SAN, fontSize: 14, fontWeight: 700, color: "#fff", background: busy ? C.faint : C.moss, border: "none", borderRadius: 3, padding: "11px 20px", cursor: busy ? "default" : "pointer" }}>{busy ? "Creating\u2026" : "Create " + milestones.length + " tasks"}</button>
+      <button onClick={send} disabled={busy} style={{ fontFamily: SAN, fontSize: 14, fontWeight: 700, color: "#fff", background: busy ? C.faint : C.moss, border: "none", borderRadius: 12, padding: "11px 20px", cursor: busy ? "default" : "pointer" }}>{busy ? "Creating\u2026" : "Create " + milestones.length + " tasks"}</button>
     </div>
   );
 }
@@ -685,7 +685,7 @@ function DeadlineTracker() {
   };
 
   return (<div>
-    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "11px 14px", marginBottom: 18 }}>
+    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 12, padding: "11px 14px", marginBottom: 18 }}>
       <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Enter the date of acceptance and it maps the key Multi-Board 8.0 deadlines (attorney review, inspection, insurance, financing). Export them to your calendar with reminders. <b>Estimate — always verify against the executed contract.</b></p>
     </div>
     <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -694,7 +694,7 @@ function DeadlineTracker() {
     </div>
     <Field label="Property (optional)"><input style={inputStyle} value={addr} onChange={(e) => setAddr(e.target.value)} placeholder="123 Oak St" /></Field>
 
-    {milestones.length > 0 && <div style={{ marginTop: 14, border: `2px solid ${C.ink}`, borderRadius: 5, overflow: "hidden" }}>
+    {milestones.length > 0 && <div style={{ marginTop: 14, border: `2px solid ${C.ink}`, borderRadius: 16, overflow: "hidden" }}>
       <div style={{ background: C.ink, color: "#fff", padding: "10px 14px", fontFamily: SER, fontWeight: 700, fontSize: 16 }}>Key Deadlines</div>
       <div style={{ padding: 14 }}>
         {milestones.map((m, i) => (
@@ -707,8 +707,8 @@ function DeadlineTracker() {
     </div>}
 
     {milestones.length > 0 && <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
-      <button onClick={exportCal} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: "#fff", background: C.moss, border: "none", borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Add deadlines to calendar</button>
-      <button onClick={copyText} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: C.ink, background: "transparent", border: `1.5px solid ${C.ink}`, borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Copy</button>
+      <button onClick={exportCal} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: "#fff", background: C.moss, border: "none", borderRadius: 12, padding: "11px 18px", cursor: "pointer" }}>Add deadlines to calendar</button>
+      <button onClick={copyText} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: C.ink, background: "transparent", border: `1.5px solid ${C.ink}`, borderRadius: 12, padding: "11px 18px", cursor: "pointer" }}>Copy</button>
     </div>}
     {milestones.length > 0 && <DeadlineFub milestones={milestones} addr={addr} />}
   </div>);
@@ -834,7 +834,7 @@ function SellerNetSheet() {
   const row = (label, v, bold, neg) => (v || v === 0) ? <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "5px 0", borderBottom: `1px solid ${C.line}` }}><span style={{ fontFamily: SAN, fontSize: 13, color: C.ink, fontWeight: bold ? 700 : 400 }}>{label}</span><span style={{ fontFamily: SAN, fontSize: 13, color: bold ? C.ink : C.faint, fontWeight: bold ? 700 : 600 }}>{neg && v ? "−" : ""}{money(v)}</span></div> : null;
 
   return (<div>
-    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "11px 14px", marginBottom: 18 }}>
+    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 12, padding: "11px 14px", marginBottom: 18 }}>
       <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Illinois seller net sheet. You enter the deal numbers; tap <b>Estimate with AI</b> to fill typical title/recording/settlement costs, then override anything. State & county transfer taxes auto-calculate. Every line is editable. <b>Estimate only — confirm with your title company.</b></p>
     </div>
 
@@ -869,7 +869,7 @@ function SellerNetSheet() {
 
     <div style={{ fontFamily: SAN, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: C.moss, margin: "18px 0 8px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
       Back-end costs (AI estimates — override anytime)
-      <button onClick={estimateWithAI} disabled={busy} style={{ fontFamily: SAN, fontSize: 12, fontWeight: 700, color: "#fff", background: busy ? C.faint : C.moss, border: "none", borderRadius: 3, padding: "7px 13px", cursor: busy ? "default" : "pointer", textTransform: "none", letterSpacing: 0 }}>{busy ? "Estimating…" : "Estimate with AI"}</button>
+      <button onClick={estimateWithAI} disabled={busy} style={{ fontFamily: SAN, fontSize: 12, fontWeight: 700, color: "#fff", background: busy ? C.faint : C.moss, border: "none", borderRadius: 12, padding: "7px 13px", cursor: busy ? "default" : "pointer", textTransform: "none", letterSpacing: 0 }}>{busy ? "Estimating…" : "Estimate with AI"}</button>
     </div>
     {aiNote && <p style={{ fontFamily: SAN, fontSize: 12, color: C.moss, marginTop: 0 }}>{aiNote}</p>}
     {err && <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.amberDeep, marginTop: 0 }}>{err}</p>}
@@ -890,7 +890,7 @@ function SellerNetSheet() {
       {fld("County Transfer Tax (auto)", "transferCounty", "auto from price")}
     </div>
 
-    <div style={{ marginTop: 20, border: `2px solid ${C.ink}`, borderRadius: 5, overflow: "hidden" }}>
+    <div style={{ marginTop: 20, border: `2px solid ${C.ink}`, borderRadius: 16, overflow: "hidden" }}>
       <div style={{ background: C.ink, color: "#fff", padding: "12px 16px", textAlign: "center" }}>
         <div style={{ fontFamily: SER, fontWeight: 700, fontSize: 19 }}>{brokerName}</div>
         <div style={{ fontFamily: SAN, fontSize: 13, fontWeight: 600 }}>Estimated Seller Net Sheet</div>
@@ -918,8 +918,8 @@ function SellerNetSheet() {
     </div>
 
     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
-      <button onClick={copy} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: copied ? "#fff" : C.ink, background: copied ? C.moss : "transparent", border: `1.5px solid ${copied ? C.moss : C.ink}`, borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>{copied ? "Copied ✓" : "Copy net sheet"}</button>
-      <button onClick={email} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: C.ink, background: "transparent", border: `1.5px solid ${C.ink}`, borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Email it</button>
+      <button onClick={copy} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: copied ? "#fff" : C.ink, background: copied ? C.moss : "transparent", border: `1.5px solid ${copied ? C.moss : C.ink}`, borderRadius: 12, padding: "11px 18px", cursor: "pointer" }}>{copied ? "Copied ✓" : "Copy net sheet"}</button>
+      <button onClick={email} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: C.ink, background: "transparent", border: `1.5px solid ${C.ink}`, borderRadius: 12, padding: "11px 18px", cursor: "pointer" }}>Email it</button>
     </div>
   </div>);
 }
@@ -1008,7 +1008,7 @@ function CommissionStatement() {
   const row = (label, val, bold) => <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "5px 0", borderBottom: `1px solid ${C.line}` }}><span style={{ fontFamily: SAN, fontSize: 13.5, color: C.ink, fontWeight: bold ? 700 : 400 }}>{label}</span><span style={{ fontFamily: SAN, fontSize: 13.5, color: C.ink, fontWeight: bold ? 700 : 600 }}>{val}</span></div>;
 
   return (<div>
-    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "11px 14px", marginBottom: 18 }}>
+    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 12, padding: "11px 14px", marginBottom: 18 }}>
       <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Fill in whatever applies — leave the rest blank. Buyer Broker, Net Commission, and the totals calculate automatically. "Prepared by" uses your Brand brokerage.</p>
     </div>
 
@@ -1035,7 +1035,7 @@ function CommissionStatement() {
       {moneyInput("Broker Office Admission Fee (Buyer)", "officeAdmissionFee", "$500")}
     </div>
 
-    <div style={{ marginTop: 20, border: `2px solid ${C.ink}`, borderRadius: 5, overflow: "hidden" }}>
+    <div style={{ marginTop: 20, border: `2px solid ${C.ink}`, borderRadius: 16, overflow: "hidden" }}>
       <div style={{ background: C.ink, color: "#fff", padding: "12px 16px", textAlign: "center" }}>
         <div style={{ fontFamily: SER, fontWeight: 700, fontSize: 20, letterSpacing: 0.5 }}>{brokerName}</div>
         <div style={{ fontFamily: SAN, fontSize: 13, fontWeight: 600 }}>Commission Statement</div>
@@ -1061,9 +1061,9 @@ function CommissionStatement() {
     </div>
 
     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
-      <button onClick={copy} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: copied ? "#fff" : C.ink, background: copied ? C.moss : "transparent", border: `1.5px solid ${copied ? C.moss : C.ink}`, borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>{copied ? "Copied ✓" : "Copy statement"}</button>
-      <button onClick={csv} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: C.ink, background: "transparent", border: `1.5px solid ${C.ink}`, borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Download CSV</button>
-      <button onClick={email} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: C.ink, background: "transparent", border: `1.5px solid ${C.ink}`, borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Email it</button>
+      <button onClick={copy} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: copied ? "#fff" : C.ink, background: copied ? C.moss : "transparent", border: `1.5px solid ${copied ? C.moss : C.ink}`, borderRadius: 12, padding: "11px 18px", cursor: "pointer" }}>{copied ? "Copied ✓" : "Copy statement"}</button>
+      <button onClick={csv} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: C.ink, background: "transparent", border: `1.5px solid ${C.ink}`, borderRadius: 12, padding: "11px 18px", cursor: "pointer" }}>Download CSV</button>
+      <button onClick={email} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: C.ink, background: "transparent", border: `1.5px solid ${C.ink}`, borderRadius: 12, padding: "11px 18px", cursor: "pointer" }}>Email it</button>
     </div>
   </div>);
 }
@@ -1127,7 +1127,7 @@ function OfferBuilder() {
   const half = { flex: "1 1 150px" };
   const third = { flex: "1 1 120px" };
   return (<div>
-    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "11px 14px", marginBottom: 18 }}>
+    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 12, padding: "11px 14px", marginBottom: 18 }}>
       <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Enter the deal once — get a copy-ready deal sheet for dotloop, plain-English contingency notes, a cover note to the other agent, and a client explanation. Tuned to the Multi-Board 8.0. It organizes YOUR decisions; it doesn't fill the official form or give legal advice.</p>
     </div>
 
@@ -1225,7 +1225,7 @@ function dealToCSV(deal, side) {
 
 function CopyDealData({ deal, side }) {
   const [copied, setCopied] = useState(false);
-  const btn = (active) => ({ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: active ? "#fff" : C.ink, background: active ? C.moss : "transparent", border: `1.5px solid ${active ? C.moss : C.ink}`, borderRadius: 3, padding: "11px 16px", cursor: "pointer" });
+  const btn = (active) => ({ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: active ? "#fff" : C.ink, background: active ? C.moss : "transparent", border: `1.5px solid ${active ? C.moss : C.ink}`, borderRadius: 12, padding: "11px 16px", cursor: "pointer" });
 
   const copy = async () => {
     const text = dealToText(deal, side);
@@ -1317,11 +1317,11 @@ function SendToFub({ deal, side, inline }) {
   };
 
   if (!open) {
-    return <button onClick={openPanel} style={{ marginTop: inline ? 0 : 18, fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: "#fff", background: C.moss, border: "none", borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Send to Follow Up Boss →</button>;
+    return <button onClick={openPanel} style={{ marginTop: inline ? 0 : 18, fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: "#fff", background: C.moss, border: "none", borderRadius: 12, padding: "11px 18px", cursor: "pointer" }}>Send to Follow Up Boss →</button>;
   }
 
   return (
-    <div style={{ marginTop: 20, width: "100%", flexBasis: "100%", border: `1.5px solid ${C.moss}`, borderRadius: 5, padding: 16, background: "#fff" }}>
+    <div style={{ marginTop: 20, width: "100%", flexBasis: "100%", border: `1.5px solid ${C.moss}`, borderRadius: 16, padding: 16, background: "#fff" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
         <span style={{ fontFamily: SER, fontWeight: 700, fontSize: 17, color: C.ink }}>Send to Follow Up Boss</span>
         <button onClick={() => setOpen(false)} style={{ fontFamily: SAN, fontSize: 12, color: C.faint, background: "none", border: "none", cursor: "pointer" }}>close ✕</button>
@@ -1349,7 +1349,7 @@ function SendToFub({ deal, side, inline }) {
       {err && <p style={{ fontFamily: SAN, fontSize: 13, color: C.amberDeep, margin: "4px 0 10px" }}>{err}</p>}
       {done && <p style={{ fontFamily: SAN, fontSize: 13, color: C.moss, fontWeight: 600, margin: "4px 0 10px" }}>{done}</p>}
 
-      <button onClick={send} disabled={busy} style={{ fontFamily: SAN, fontSize: 14, fontWeight: 700, color: "#fff", background: busy ? C.faint : C.moss, border: "none", borderRadius: 3, padding: "11px 20px", cursor: busy ? "default" : "pointer" }}>{busy ? "Sending…" : "Create contact + deal"}</button>
+      <button onClick={send} disabled={busy} style={{ fontFamily: SAN, fontSize: 14, fontWeight: 700, color: "#fff", background: busy ? C.faint : C.moss, border: "none", borderRadius: 12, padding: "11px 20px", cursor: busy ? "default" : "pointer" }}>{busy ? "Sending…" : "Create contact + deal"}</button>
     </div>
   );
 }
@@ -1420,11 +1420,11 @@ function SendToDotloop({ deal, side, inline }) {
   };
 
   if (!open) {
-    return <button onClick={() => setOpen(true)} style={{ marginTop: inline ? 0 : 18, fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: "#fff", background: C.amber, border: "none", borderRadius: 3, padding: "11px 18px", cursor: "pointer" }}>Send to dotloop ↗</button>;
+    return <button onClick={() => setOpen(true)} style={{ marginTop: inline ? 0 : 18, fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: "#fff", background: C.amber, border: "none", borderRadius: 12, padding: "11px 18px", cursor: "pointer" }}>Send to dotloop ↗</button>;
   }
 
   return (
-    <div style={{ marginTop: 20, width: "100%", flexBasis: "100%", border: "1.5px solid " + C.amber, borderRadius: 5, padding: 16, background: "#fff" }}>
+    <div style={{ marginTop: 20, width: "100%", flexBasis: "100%", border: "1.5px solid " + C.amber, borderRadius: 16, padding: 16, background: "#fff" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
         <span style={{ fontFamily: SER, fontWeight: 700, fontSize: 17, color: C.ink }}>Send to dotloop</span>
         <button onClick={() => setOpen(false)} style={{ fontFamily: SAN, fontSize: 12, color: C.faint, background: "none", border: "none", cursor: "pointer" }}>close ✕</button>
@@ -1435,7 +1435,7 @@ function SendToDotloop({ deal, side, inline }) {
           <Field label="Zapier webhook URL"><input style={inputStyle} value={hookInput} onChange={(e) => setHookInput(e.target.value)} placeholder="https://hooks.zapier.com/hooks/catch/…" /></Field>
           {err && <p style={{ fontFamily: SAN, fontSize: 13, color: C.amberDeep }}>{err}</p>}
           {done && <p style={{ fontFamily: SAN, fontSize: 13, color: C.moss, fontWeight: 600 }}>{done}</p>}
-          <button onClick={saveHook} style={{ fontFamily: SAN, fontSize: 14, fontWeight: 700, color: "#fff", background: C.amber, border: "none", borderRadius: 3, padding: "11px 20px", cursor: "pointer" }}>Save webhook</button>
+          <button onClick={saveHook} style={{ fontFamily: SAN, fontSize: 14, fontWeight: 700, color: "#fff", background: C.amber, border: "none", borderRadius: 12, padding: "11px 20px", cursor: "pointer" }}>Save webhook</button>
         </div>
       ) : (
         <div>
@@ -1450,7 +1450,7 @@ function SendToDotloop({ deal, side, inline }) {
           <p style={{ fontFamily: SAN, fontSize: 12, color: C.faint, lineHeight: 1.5 }}>Deal details (address, MLS #, prices, earnest, financing, closing) go automatically — then tap <b>Autofill</b> on the contract in dotloop to pull them into the form fields.</p>
           {err && <p style={{ fontFamily: SAN, fontSize: 13, color: C.amberDeep }}>{err}</p>}
           {done && <p style={{ fontFamily: SAN, fontSize: 13, color: C.moss, fontWeight: 600 }}>{done}</p>}
-          <button onClick={send} disabled={busy} style={{ fontFamily: SAN, fontSize: 14, fontWeight: 700, color: "#fff", background: busy ? C.faint : C.amber, border: "none", borderRadius: 3, padding: "11px 20px", cursor: busy ? "default" : "pointer" }}>{busy ? "Sending…" : "Create loop in dotloop"}</button>
+          <button onClick={send} disabled={busy} style={{ fontFamily: SAN, fontSize: 14, fontWeight: 700, color: "#fff", background: busy ? C.faint : C.amber, border: "none", borderRadius: 12, padding: "11px 20px", cursor: busy ? "default" : "pointer" }}>{busy ? "Sending…" : "Create loop in dotloop"}</button>
         </div>
       )}
     </div>
@@ -1473,7 +1473,7 @@ function ContractPrep() {
   };
   void ROSTER_LOCAL;
   return (<div>
-    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "11px 14px", marginBottom: 18 }}>
+    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 12, padding: "11px 14px", marginBottom: 18 }}>
       <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Anchor tags let DocuSign auto-place every field on upload — no dragging. Best for addenda, counters & term sheets; for a full multi-page form, upload the blank in a Claude chat. Always use your approved form and have a broker/attorney review — this is a draft, not legal advice.</p>
     </div>
     <Field label="Document type"><Chips options={["Addendum", "Counter-offer", "Term sheet", "Amendment"]} value={docType} onChange={setDocType} /></Field>
@@ -1522,7 +1522,7 @@ function QuickOffer() {
 
   const half = { flex: "1 1 130px" };
   return (<div>
-    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "11px 14px", marginBottom: 18 }}>
+    <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 12, padding: "11px 14px", marginBottom: 18 }}>
       <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Set your buyer once, then fire off an offer per property — just address + price. Saved between sessions on this device. Drafts a term sheet with anchor tags ready for DocuSign; review before sending — not legal advice.</p>
     </div>
 
@@ -1531,7 +1531,7 @@ function QuickOffer() {
       <button onClick={() => setShowBuyer((s) => !s)} style={miniBtn(C.amber)}>{showBuyer ? "hide" : "edit buyer"}</button>
     </div>
 
-    {showBuyer && (<div style={{ border: `1.5px solid ${C.line}`, borderRadius: 3, padding: 16, marginBottom: 18, background: "#fff" }}>
+    {showBuyer && (<div style={{ border: `1.5px solid ${C.line}`, borderRadius: 12, padding: 16, marginBottom: 18, background: "#fff" }}>
       <Field label="Buyer name(s)"><input style={inputStyle} value={buyer.names} onChange={(e) => setB("names", e.target.value)} placeholder="Maya Chen & Alex Chen" /></Field>
       <Field label="Financing"><Chips options={["Cash", "Conventional", "FHA", "VA"]} value={buyer.financing} onChange={(v) => setB("financing", v)} /></Field>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -1544,7 +1544,7 @@ function QuickOffer() {
         <div style={half}><Field label="Appraisal (days)"><input style={inputStyle} value={buyer.appraisal} onChange={(e) => setB("appraisal", e.target.value)} /></Field></div>
       </div>
       <Field label="Standing terms (optional)"><textarea style={{ ...inputStyle, minHeight: 50 }} value={buyer.standing} onChange={(e) => setB("standing", e.target.value)} placeholder="Seller to pay buyer agent comp; home warranty requested; possession at close." /></Field>
-      <button onClick={saveBuyer} style={{ fontFamily: SAN, fontSize: 14, fontWeight: 700, color: C.cream, background: savedFlash ? C.moss : C.ink, border: "none", borderRadius: 3, padding: "10px 20px", cursor: "pointer" }}>{savedFlash ? "saved ✓" : "Save buyer"}</button>
+      <button onClick={saveBuyer} style={{ fontFamily: SAN, fontSize: 14, fontWeight: 700, color: C.cream, background: savedFlash ? C.moss : C.ink, border: "none", borderRadius: 12, padding: "10px 20px", cursor: "pointer" }}>{savedFlash ? "saved ✓" : "Save buyer"}</button>
     </div>)}
 
     <Field label="Property address"><input style={inputStyle} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="123 Oak St, Nashville TN 37206" /></Field>
@@ -1643,7 +1643,7 @@ function OfferCompare() {
     <div style={{ display: "flex", gap: 7, marginBottom: 16 }}>{modeBtn("paste", "Paste terms")}{modeBtn("upload", "Upload PDFs")}</div>
 
     {mode === "paste" && (<div>
-      <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "11px 14px", marginBottom: 18 }}>
+      <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 12, padding: "11px 14px", marginBottom: 18 }}>
         <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Paste each offer's key terms. Runs on the in-app AI (concise output). To read full PDFs end-to-end, switch to Upload PDFs.</p>
       </div>
       {offers.map((o, i) => (
@@ -1655,23 +1655,23 @@ function OfferCompare() {
           <textarea style={{ ...inputStyle, minHeight: 80 }} value={o.text} onChange={(e) => setText(o.id, e.target.value)} placeholder={i === 0 ? "Price $620k, conventional, 20% down, pre-approved. EM $12k. Inspection 7 days. Appraisal gap covered to $10k. Close 25 days." : "Paste this offer's key terms…"} />
         </div>
       ))}
-      <button onClick={addOffer} style={{ fontFamily: SAN, fontSize: 13, fontWeight: 700, color: C.amber, background: "transparent", border: `1.5px dashed ${C.line}`, borderRadius: 3, padding: "8px 14px", cursor: "pointer", marginBottom: 16 }}>+ add another offer</button>
+      <button onClick={addOffer} style={{ fontFamily: SAN, fontSize: 13, fontWeight: 700, color: C.amber, background: "transparent", border: `1.5px dashed ${C.line}`, borderRadius: 12, padding: "8px 14px", cursor: "pointer", marginBottom: 16 }}>+ add another offer</button>
       <Field label="What does your client care about most? (optional)"><input style={inputStyle} value={priorities} onChange={(e) => setPriorities(e.target.value)} placeholder="Max net proceeds · fastest, cleanest close · certainty over top dollar" /></Field>
       <RunButton onClick={run} loading={t.loading}>Compare & recommend →</RunButton>
       <div style={{ marginTop: 22 }}><Results {...t} noun="analysis" onRefine={t.refine} /></div>
     </div>)}
 
     {mode === "upload" && (<div>
-      <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.amber}`, borderRadius: 2, padding: "11px 14px", marginBottom: 18 }}>
+      <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.amber}`, borderRadius: 12, padding: "11px 14px", marginBottom: 18 }}>
         <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Reads full PDFs end-to-end. Text is extracted here in your browser; only text is sent to the server. Scanned PDFs are flagged and skipped (OCR is a later add).</p>
       </div>
-      <label style={{ display: "block", border: `2px dashed ${C.line}`, borderRadius: 6, padding: 22, textAlign: "center", cursor: "pointer", color: C.faint, fontFamily: SAN, fontSize: 14, background: "#fff", marginBottom: 14 }}>
+      <label style={{ display: "block", border: `2px dashed ${C.line}`, borderRadius: 14, padding: 22, textAlign: "center", cursor: "pointer", color: C.faint, fontFamily: SAN, fontSize: 14, background: "#fff", marginBottom: 14 }}>
         Tap to choose offer PDFs (2–12)
         <input type="file" accept="application/pdf" multiple style={{ display: "none" }} onChange={(e) => onPick(e.target.files)} />
       </label>
       <div style={{ display: "grid", gap: 8, marginBottom: 14 }}>
         {files.map((f) => (
-          <div key={f.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: SAN, fontSize: 13.5, background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${f.scanned ? C.amber : C.moss}`, borderRadius: 3, padding: "9px 12px" }}>
+          <div key={f.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: SAN, fontSize: 13.5, background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${f.scanned ? C.amber : C.moss}`, borderRadius: 12, padding: "9px 12px" }}>
             <span>{f.name} {f.scanned ? <span style={{ color: C.amberDeep, fontSize: 12 }}>— no text (scanned?)</span> : <span style={{ color: C.faint, fontSize: 12 }}>— {f.text.length.toLocaleString()} chars</span>}</span>
             <button onClick={() => setFiles((x) => x.filter((y) => y.id !== f.id))} style={miniBtn(C.faint)}>remove</button>
           </div>
@@ -1681,7 +1681,7 @@ function OfferCompare() {
       <RunButton onClick={analyze} loading={busy}>Analyze offers →</RunButton>
       {uErr && <p style={{ fontFamily: SAN, fontSize: 14, color: C.amberDeep, marginTop: 12 }}>{uErr}</p>}
       {uOut && (
-        <div style={{ marginTop: 20, background: C.paper, border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.amber}`, borderRadius: 2, padding: "16px 18px" }}>
+        <div style={{ marginTop: 20, background: C.paper, border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.amber}`, borderRadius: 12, padding: "16px 18px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
             <span style={{ fontFamily: SER, fontStyle: "italic", fontSize: 14, color: C.faint }}>analysis</span>
             <div style={{ display: "flex", gap: 14 }}>
@@ -1715,7 +1715,7 @@ function SignatureRequest() {
 }
 
 const GROUPS = [
-  { name: "Outreach & Follow-Up", color: "#c0392b", tabs: [
+  { name: "Outreach & Follow-Up", color: "#e0703c", tabs: [
     { id: "follow", label: "Follow-Up Writer", sub: "Turn a lead's situation into messages worth replying to.", el: FollowUp },
     { id: "obj", label: "Objection Studio", sub: "Three confident ways to answer anything they throw at you.", el: Objection },
     { id: "warm", label: "Warm-Up Batch", sub: "Paste your cold database, get a tailored text for each.", el: Warmup },
@@ -1723,7 +1723,7 @@ const GROUPS = [
     { id: "vm", label: "Voicemail + Text", sub: "A matched voicemail script and follow-up text for cold outreach.", el: Voicemail },
     { id: "rev", label: "Review Request", sub: "Warm, easy-yes asks for a Google/Zillow review.", el: Review },
   ] },
-  { name: "Social Content", color: "#1f3a5f", tabs: [
+  { name: "Social Content", color: "#0e7c66", tabs: [
     { id: "content", label: "Content Engine", sub: "A topic in, a week of posts out.", el: Content },
     { id: "engage", label: "Engagement Posts", sub: "“Text / comment / DM X to get Y” lead-magnet posts.", el: Engagement },
     { id: "mile", label: "Milestone Posts", sub: "Just Listed, Just Closed, Offer Accepted & New Listing.", el: Milestone },
@@ -1732,7 +1732,7 @@ const GROUPS = [
     { id: "market", label: "Market Update", sub: "Your local stats, turned into expert content.", el: MarketUpdate },
     { id: "news", label: "Email Newsletter", sub: "Your month's news, drafted into a clean send.", el: Newsletter },
   ] },
-  { name: "Listings & Appointments", color: "#2c5d8a", tabs: [
+  { name: "Listings & Appointments", color: "#d9a13b", tabs: [
     { id: "listing", label: "Listing Writer", sub: "Property notes in, a description that sells out.", el: Listing },
     { id: "listpres", label: "Listing Presentation", sub: "Your notes into a deliver-ready presentation to win the listing.", el: ListingPresentation },
     { id: "cma", label: "CMA Builder", sub: "Bring your comps — get the analysis, a price range & a client-ready writeup.", el: CMABuilder },
@@ -1740,7 +1740,7 @@ const GROUPS = [
     { id: "open", label: "Open-House Script", sub: "A game plan for the door, walkthrough, and follow-up.", el: OpenHouse },
     { id: "prep", label: "Consult Prep", sub: "Talking points, questions & objections before you pitch.", el: ConsultPrep },
   ] },
-  { name: "Contracts & Signing", color: "#902519", tabs: [
+  { name: "Contracts & Signing", color: "#b5446e", tabs: [
     { id: "offerbuild", label: "Offer Builder", sub: "Enter the deal once — deal sheet, contingency notes, cover note & client explainer.", el: OfferBuilder },
     { id: "quick", label: "Quick Offer", sub: "Set your buyer once, then one offer per property — address + price.", el: QuickOffer },
     { id: "contract", label: "Contract Prep", sub: "Fill your terms into a clean draft with signature blocks ready for e-sign.", el: ContractPrep },
@@ -1753,7 +1753,7 @@ const GROUPS = [
 ];
 const ALL = GROUPS.flatMap((g) => g.tabs);
 
-const savedCard = { background: C.paper, border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "13px 15px" };
+const savedCard = { background: C.paper, border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 12, padding: "13px 15px" };
 const savedHead = { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 };
 const savedText = { fontFamily: SAN, fontSize: 14, lineHeight: 1.5, color: C.ink, whiteSpace: "pre-wrap", margin: 0 };
 
@@ -1847,14 +1847,14 @@ function SavedDrawer({ open, onClose }) {
             {week[di].length === 0 && <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, fontStyle: "italic", margin: "0 0 4px" }}>— open —</p>}
             <div style={{ display: "grid", gap: 8 }}>{week[di].map((s) => (
               <div key={s.id} style={{ ...savedCard, padding: "11px 13px" }}><div style={savedHead}><span style={{ fontFamily: SER, fontStyle: "italic", fontSize: 12, color: C.faint }}>{s.noun}</span><div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <select value={typeof s.day === "number" ? s.day : di} onChange={(e) => update(s.id, { day: Number(e.target.value) })} style={{ fontFamily: SAN, fontSize: 11.5, color: C.ink, background: C.cream, border: `1px solid ${C.line}`, borderRadius: 2, padding: "2px 4px" }}>{DAYS.map((dd, i) => <option key={dd} value={i}>{dd}</option>)}</select>
+                <select value={typeof s.day === "number" ? s.day : di} onChange={(e) => update(s.id, { day: Number(e.target.value) })} style={{ fontFamily: SAN, fontSize: 11.5, color: C.ink, background: C.cream, border: `1px solid ${C.line}`, borderRadius: 12, padding: "2px 4px" }}>{DAYS.map((dd, i) => <option key={dd} value={i}>{dd}</option>)}</select>
                 <CopyBtn text={s.text} /><button onClick={() => remove(s.id)} style={miniBtn(C.amberDeep)}>✕</button>
               </div></div><p style={{ ...savedText, fontSize: 13.5, maxHeight: 88, overflow: "hidden" }}>{s.text}</p></div>
             ))}</div>
           </div>
         ))}</div>}
         {view === "calendar" && <div>
-          <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 2, padding: "10px 12px", marginBottom: 14 }}>
+          <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 12, padding: "10px 12px", marginBottom: 14 }}>
             <p style={{ fontFamily: SAN, fontSize: 12, color: C.faint, lineHeight: 1.5, margin: 0 }}>Give each saved post a date below, then tap <b>Add to my calendar</b> to drop them into your Google/Apple/Outlook calendar — it'll remind you to post. Nothing auto-posts.</p>
           </div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
@@ -1870,18 +1870,18 @@ function SavedDrawer({ open, onClose }) {
               const ds = calYear + "-" + pad2(calMonth + 1) + "-" + pad2(day);
               const count = (byDate[ds] || []).length;
               const isToday = ds === ymd(today);
-              return <div key={day} style={{ minHeight: 34, border: `1px solid ${count ? C.moss : C.line}`, borderRadius: 3, padding: 2, background: count ? "rgba(31,58,95,.07)" : "#fff", textAlign: "center" }}>
+              return <div key={day} style={{ minHeight: 34, border: `1px solid ${count ? C.moss : C.line}`, borderRadius: 12, padding: 2, background: count ? "rgba(31,58,95,.07)" : "#fff", textAlign: "center" }}>
                 <div style={{ fontFamily: SAN, fontSize: 10.5, fontWeight: isToday ? 700 : 400, color: isToday ? C.amber : C.ink }}>{day}</div>
                 {count > 0 && <div style={{ fontFamily: SAN, fontSize: 9, color: C.moss, fontWeight: 700 }}>{count} post{count > 1 ? "s" : ""}</div>}
               </div>;
             })}
           </div>
-          <button onClick={() => downloadICS(scheduledItems, "closeassist-content-calendar.ics")} disabled={!scheduledItems.length} style={{ width: "100%", fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: scheduledItems.length ? "#fff" : C.faint, background: scheduledItems.length ? C.moss : "transparent", border: `1.5px solid ${scheduledItems.length ? C.moss : C.line}`, borderRadius: 3, padding: "11px", cursor: scheduledItems.length ? "pointer" : "default", marginBottom: 16 }}>Add to my calendar ({scheduledItems.length} dated)</button>
+          <button onClick={() => downloadICS(scheduledItems, "closeassist-content-calendar.ics")} disabled={!scheduledItems.length} style={{ width: "100%", fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: scheduledItems.length ? "#fff" : C.faint, background: scheduledItems.length ? C.moss : "transparent", border: `1.5px solid ${scheduledItems.length ? C.moss : C.line}`, borderRadius: 12, padding: "11px", cursor: scheduledItems.length ? "pointer" : "default", marginBottom: 16 }}>Add to my calendar ({scheduledItems.length} dated)</button>
           <div style={{ display: "grid", gap: 10 }}>{saved.map((s) => (
             <div key={s.id} style={{ ...savedCard, padding: "11px 13px" }}>
               <div style={savedHead}><span style={{ fontFamily: SER, fontStyle: "italic", fontSize: 12, color: C.faint }}>{s.noun}</span>
                 <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                  <input type="date" value={s.date || ""} onChange={(e) => update(s.id, { date: e.target.value })} style={{ fontFamily: SAN, fontSize: 11.5, color: C.ink, background: C.cream, border: `1px solid ${C.line}`, borderRadius: 2, padding: "2px 4px" }} />
+                  <input type="date" value={s.date || ""} onChange={(e) => update(s.id, { date: e.target.value })} style={{ fontFamily: SAN, fontSize: 11.5, color: C.ink, background: C.cream, border: `1px solid ${C.line}`, borderRadius: 12, padding: "2px 4px" }} />
                   <button onClick={() => downloadICS([s], "post.ics")} disabled={!s.date} style={miniBtn(s.date ? C.moss : C.faint)}>+cal</button>
                   <button onClick={() => remove(s.id)} style={miniBtn(C.amberDeep)}>✕</button>
                 </div></div>
@@ -1938,13 +1938,13 @@ function LoginScreen({ onSuccess }) {
   };
   return (
     <div style={{ minHeight: "100vh", background: C.cream, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, backgroundImage: "radial-gradient(circle at 15% 20%, rgba(192,57,43,.07), transparent 42%), radial-gradient(circle at 85% 80%, rgba(31,58,95,.07), transparent 45%)" }}>
-      <div style={{ width: "min(380px, 100%)", background: C.paper, border: `2px solid ${C.ink}`, borderRadius: 6, padding: 30, boxShadow: `8px 8px 0 ${C.amber}` }}>
+      <div style={{ width: "min(380px, 100%)", background: C.paper, border: `2px solid ${C.ink}`, borderRadius: 14, padding: 30, boxShadow: `8px 8px 0 ${C.amber}` }}>
         <div style={{ fontFamily: SER, fontWeight: 700, fontSize: 30, color: C.ink, letterSpacing: -0.5 }}>Close<span style={{ color: C.amber }}>Assist</span></div>
         <p style={{ fontFamily: SER, fontStyle: "italic", fontSize: 15, color: C.faint, margin: "2px 0 22px" }}>your AI sales desk</p>
         <label style={{ display: "block", fontFamily: SAN, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1.2, color: C.faint, marginBottom: 6 }}>Password</label>
         <input style={inputStyle} type="password" value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="enter your access password" autoFocus />
         {err && <p style={{ fontFamily: SAN, fontSize: 13, color: C.amberDeep, margin: "10px 0 0" }}>{err}</p>}
-        <button onClick={submit} disabled={busy} style={{ width: "100%", marginTop: 16, fontFamily: SAN, fontSize: 15, fontWeight: 700, color: C.cream, background: busy ? C.faint : C.amber, border: "none", borderRadius: 3, padding: "13px", cursor: busy ? "default" : "pointer" }}>{busy ? "checking…" : "Enter →"}</button>
+        <button onClick={submit} disabled={busy} style={{ width: "100%", marginTop: 16, fontFamily: SAN, fontSize: 15, fontWeight: 700, color: C.cream, background: busy ? C.faint : C.amber, border: "none", borderRadius: 12, padding: "13px", cursor: busy ? "default" : "pointer" }}>{busy ? "checking…" : "Enter →"}</button>
       </div>
     </div>
   );
@@ -1957,7 +1957,7 @@ const NEEDS = [
   { gi: 2, q: "I need listing help", d: "Win the appointment — descriptions, presentations, CMAs, price updates, open houses." },
   { gi: 3, q: "I need contracts", d: "Get it under contract — offers, net sheets, commission statements, signature requests." },
 ];
-const tourCard = { background: C.paper, border: "1.5px solid " + C.line, borderRadius: 4, padding: "16px 14px", display: "flex", flexDirection: "column", gap: 7, alignItems: "flex-start" };
+const tourCard = { background: C.paper, border: "1.5px solid " + C.line, borderRadius: 12, padding: "16px 14px", display: "flex", flexDirection: "column", gap: 7, alignItems: "flex-start" };
 const tourTitle = { fontFamily: SAN, fontSize: 14, fontWeight: 700, color: C.ink };
 const tourText = { fontFamily: SAN, fontSize: 13, color: C.faint, lineHeight: 1.55, margin: 0 };
 
@@ -1971,7 +1971,7 @@ function HomeView({ profile, goSection, setDrawer }) {
       <p style={{ fontFamily: SAN, fontSize: 15, color: C.faint, margin: "0 0 22px" }}>What do you need today?</p>
       <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", marginBottom: 36 }}>
         {NEEDS.map((n) => { const g = GROUPS[n.gi]; return (
-          <button key={n.gi} onClick={() => goSection(n.gi)} style={{ textAlign: "left", fontFamily: SAN, background: C.paper, border: "2px solid " + C.line, borderTop: "6px solid " + g.color, borderRadius: 4, padding: "18px 16px", cursor: "pointer" }}>
+          <button key={n.gi} onClick={() => goSection(n.gi)} style={{ textAlign: "left", fontFamily: SAN, background: C.paper, border: "2px solid " + C.line, borderTop: "6px solid " + g.color, borderRadius: 12, padding: "18px 16px", cursor: "pointer" }}>
             <div style={{ fontSize: 15, fontWeight: 700, color: C.ink, marginBottom: 6 }}>{n.q}</div>
             <div style={{ fontSize: 13, color: C.faint, lineHeight: 1.5, marginBottom: 12 }}>{n.d}</div>
             <div style={{ fontSize: 12.5, fontWeight: 700, color: g.color }}>{g.tabs.length} tools · {g.name} →</div>
@@ -2003,7 +2003,7 @@ function SectionView({ gi, goHome, goTool }) {
       <p style={{ fontFamily: SAN, fontSize: 13.5, color: C.faint, margin: "0 0 20px" }}>{g.tabs.length} tools — pick one to start drafting.</p>
       <div style={{ display: "grid", gap: 10 }}>
         {g.tabs.map((x) => (
-          <button key={x.id} onClick={() => goTool(x.id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, textAlign: "left", fontFamily: SAN, background: C.paper, border: "1.5px solid " + C.line, borderLeft: "5px solid " + g.color, borderRadius: 4, padding: "14px 16px", cursor: "pointer" }}>
+          <button key={x.id} onClick={() => goTool(x.id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, textAlign: "left", fontFamily: SAN, background: C.paper, border: "1.5px solid " + C.line, borderLeft: "5px solid " + g.color, borderRadius: 12, padding: "14px 16px", cursor: "pointer" }}>
             <span><span style={{ display: "block", fontSize: 15, fontWeight: 700, color: C.ink, marginBottom: 3 }}>{x.label}</span><span style={{ display: "block", fontSize: 13, color: C.faint, lineHeight: 1.45 }}>{x.sub}</span></span>
             <span style={{ fontSize: 13, fontWeight: 700, color: g.color, whiteSpace: "nowrap" }}>Open →</span>
           </button>
@@ -2040,7 +2040,7 @@ function MuseDrawer({ open, onClose, onKeyChange }) {
         </div>
         <p style={{ fontFamily: SAN, fontSize: 13.5, color: C.faint, lineHeight: 1.6, marginTop: 0 }}>CloseAssist's 27 workflows run on Muse under the hood. You get {FREE_CAP} free AI uses a month on the shared backend — or connect your own key for unlimited.</p>
         {!hasKey && (
-          <div style={{ background: "#fff", border: "1.5px solid " + C.line, borderRadius: 5, padding: 14, marginBottom: 18 }}>
+          <div style={{ background: "#fff", border: "1.5px solid " + C.line, borderRadius: 16, padding: 14, marginBottom: 18 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
               <span style={{ fontFamily: SAN, fontSize: 13, fontWeight: 700, color: C.ink }}>Free AI uses</span>
               <span style={{ fontFamily: SAN, fontSize: 13, color: use.n >= FREE_CAP ? C.amberDeep : C.faint }}>{use.n} / {FREE_CAP}</span>
@@ -2061,7 +2061,7 @@ function MuseDrawer({ open, onClose, onKeyChange }) {
             <label style={{ display: "block", fontFamily: SAN, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1.2, color: C.faint, marginBottom: 6 }}>Anthropic API key</label>
             <input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder="sk-ant-…" style={inputStyle} />
             {err && <p style={{ fontFamily: SAN, fontSize: 13, color: C.amberDeep }}>{err}</p>}
-            <button onClick={connect} style={{ width: "100%", marginTop: 12, fontFamily: SAN, fontSize: 14, fontWeight: 700, color: "#fff", background: C.amber, border: "none", borderRadius: 3, padding: "12px", cursor: "pointer" }}>Connect my Muse</button>
+            <button onClick={connect} style={{ width: "100%", marginTop: 12, fontFamily: SAN, fontSize: 14, fontWeight: 700, color: "#fff", background: C.amber, border: "none", borderRadius: 12, padding: "12px", cursor: "pointer" }}>Connect my Muse</button>
             <p style={{ fontFamily: SAN, fontSize: 12, color: C.faint, lineHeight: 1.55 }}>Get a key at console.anthropic.com. It's stored only on this device — never sent to our servers. Draft calls go straight from your browser to Anthropic.</p>
           </div>
         )}
@@ -2158,7 +2158,7 @@ function App() {
           </div>
 
           {showWelcome && <div style={{ maxWidth: 820, margin: "18px auto 0", padding: "0 28px" }}>
-            <div style={{ background: "#fff", border: `2px solid ${accent}`, borderRadius: 6, padding: "18px 20px", boxShadow: `5px 5px 0 ${accent}` }}>
+            <div style={{ background: "#fff", border: `2px solid ${accent}`, borderRadius: 14, padding: "18px 20px", boxShadow: `5px 5px 0 ${accent}` }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
                 <span style={{ fontFamily: SER, fontWeight: 700, fontSize: 20, color: C.ink }}>Welcome — start here 👋</span>
                 <button onClick={() => dismissWelcome(false)} style={{ ...miniBtn(C.faint), fontSize: 13 }}>hide</button>
@@ -2171,7 +2171,7 @@ function App() {
                 <li>Found something broken or confusing? Hit <b>✉ Feedback</b> any time.</li>
               </ol>
               <p style={{ fontFamily: SAN, fontSize: 12, color: C.faint, lineHeight: 1.5, margin: "8px 0 12px" }}>Everything you write is a draft — review before you send, and follow your usual fair-housing/advertising rules. Your Brand & saved items live on this device.</p>
-              <button onClick={() => dismissWelcome(true)} style={{ fontFamily: SAN, fontSize: 13, fontWeight: 700, color: "#fff", background: accent, border: "none", borderRadius: 3, padding: "9px 18px", cursor: "pointer" }}>Got it — don't show again</button>
+              <button onClick={() => dismissWelcome(true)} style={{ fontFamily: SAN, fontSize: 13, fontWeight: 700, color: "#fff", background: accent, border: "none", borderRadius: 12, padding: "9px 18px", cursor: "pointer" }}>Got it — don't show again</button>
             </div>
           </div>}
 
@@ -2182,7 +2182,7 @@ function App() {
               <button onClick={() => goSection(secOf(tab))} style={{ fontFamily: SAN, fontSize: 13, fontWeight: 700, color: accent, background: "transparent", border: "none", cursor: "pointer", padding: 0, marginBottom: 4 }}>← {GROUPS[secOf(tab)].name}</button>
             </div>
             <AccentCtx.Provider value={accent}>
-            <div style={{ maxWidth: 820, margin: "8px auto 0", padding: 28, background: C.paper, border: "2px solid " + accent, borderRadius: 4 }}>
+            <div style={{ maxWidth: 820, margin: "8px auto 0", padding: 28, background: C.paper, border: "2px solid " + accent, borderRadius: 12 }}>
               <p style={{ fontFamily: SER, fontStyle: "italic", fontSize: 17, color: accent, marginTop: 0, marginBottom: 22 }}>{meta.sub}{lang === "es" && <span style={{ display: "inline-block", fontFamily: SAN, fontStyle: "normal", fontSize: 11, fontWeight: 700, color: "#fff", background: accent, borderRadius: 999, padding: "2px 9px", marginLeft: 10, verticalAlign: "middle" }}>ESPAÑOL</span>}</p>
               <Active />
             </div>
