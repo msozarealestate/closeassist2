@@ -182,11 +182,78 @@ function CopyBtn({ text }) {
   return <button onClick={() => { navigator.clipboard?.writeText(text); setDone(true); setTimeout(() => setDone(false), 1400); }} style={miniBtn(done ? C.moss : C.amber)}>{done ? "copied ✓" : "copy"}</button>;
 }
 
+// Voice dictation via the browser's built-in speech recognition (Chrome/Edge/
+// Android Chrome). Free, no key. Absent on unsupported browsers — MicButton
+// renders nothing there and fields work exactly as before.
+const SR_API = (typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition)) || null;
+
+function MicButton({ value, onChange, multiline }) {
+  const [listening, setListening] = useState(false);
+  const [err, setErr] = useState("");
+  const recRef = useRef(null);
+  const baseRef = useRef("");
+  const finalsRef = useRef("");
+  useEffect(() => () => { try { recRef.current && recRef.current.abort(); } catch (e) {} }, []);
+  if (!SR_API) return null;
+  const stop = () => { try { recRef.current && recRef.current.stop(); } catch (e) {} };
+  const start = () => {
+    setErr("");
+    let rec;
+    try { rec = new SR_API(); } catch (e) { setErr("Voice input isn't available in this browser."); return; }
+    recRef.current = rec;
+    baseRef.current = value || "";
+    finalsRef.current = "";
+    rec.lang = appLang() === "es" ? "es-US" : "en-US";
+    rec.interimResults = false;
+    rec.continuous = true;
+    rec.onresult = (ev) => {
+      let add = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) { if (ev.results[i].isFinal) add += ev.results[i][0].transcript; }
+      add = add.trim();
+      if (!add) return;
+      finalsRef.current = (finalsRef.current ? finalsRef.current + " " : "") + add;
+      const base = baseRef.current;
+      const sep = base && !/\s$/.test(base) ? " " : "";
+      onChange({ target: { value: base + sep + finalsRef.current } });
+    };
+    rec.onerror = (ev) => {
+      if (ev.error === "not-allowed" || ev.error === "service-not-allowed") setErr("Mic blocked — allow microphone access for this site, then tap again.");
+      else if (ev.error === "audio-capture") setErr("No microphone found on this device.");
+      setListening(false);
+    };
+    rec.onend = () => { setListening(false); recRef.current = null; };
+    try { rec.start(); setListening(true); } catch (e) { setListening(false); }
+  };
+  return (
+    <React.Fragment>
+      <button type="button" title={listening ? "Stop dictating" : "Dictate"} aria-label={listening ? "Stop dictating" : "Dictate"} onClick={(e) => { e.preventDefault(); listening ? stop() : start(); }} style={{ position: "absolute", right: 7, top: multiline ? 7 : "50%", transform: multiline ? "none" : "translateY(-50%)", width: 32, height: 32, borderRadius: 999, border: `1.5px solid ${listening ? "#d1342c" : C.line}`, background: listening ? "#d1342c" : C.cream, fontSize: 15, lineHeight: 1, cursor: "pointer", padding: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2, animation: listening ? "micPulse 1.2s ease-out infinite" : "none" }}>{"\uD83C\uDFA4"}</button>
+      {err && <div style={{ position: "absolute", right: 0, top: "100%", marginTop: 3, maxWidth: 280, textAlign: "right", fontFamily: SAN, fontSize: 11, lineHeight: 1.35, color: C.amberDeep, zIndex: 2 }}>{err}</div>}
+    </React.Fragment>
+  );
+}
+
 function Field({ label, children }) {
+  let body = children;
+  if (SR_API) {
+    const kids = React.Children.toArray(children);
+    if (kids.length === 1) {
+      const k = kids[0];
+      const p = k.props || {};
+      const isText = k.type === "textarea" || (k.type === "input" && (!p.type || p.type === "text"));
+      if (isText && typeof p.value === "string" && typeof p.onChange === "function") {
+        body = (
+          <div style={{ position: "relative" }}>
+            {React.cloneElement(k, { style: { ...(p.style || {}), paddingRight: 46 } })}
+            <MicButton value={p.value} onChange={p.onChange} multiline={k.type === "textarea"} />
+          </div>
+        );
+      }
+    }
+  }
   return (
     <label style={{ display: "block", marginBottom: 16 }}>
       <span style={{ display: "block", fontFamily: SAN, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1.2, color: C.faint, marginBottom: 6 }}>{label}</span>
-      {children}
+      {body}
     </label>
   );
 }
@@ -263,7 +330,10 @@ function Card({ text, index, noun, onRefine }) {
       <p style={{ fontFamily: SAN, fontSize: 15, lineHeight: 1.55, color: C.ink, whiteSpace: "pre-wrap", margin: 0 }}>{busy ? "reworking…" : text}</p>
       {open && (
         <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <input style={{ ...inputStyle, flex: 1, minWidth: 200, fontSize: 14 }} value={instr} onChange={(e) => setInstr(e.target.value)} placeholder="e.g. shorter, warmer, add the price, drop the emoji…" onKeyDown={(e) => e.key === "Enter" && doRefine()} />
+          <div style={{ position: "relative", flex: 1, minWidth: 200 }}>
+            <input style={{ ...inputStyle, fontSize: 14, paddingRight: 46 }} value={instr} onChange={(e) => setInstr(e.target.value)} placeholder="e.g. shorter, warmer, add the price, drop the emoji…" onKeyDown={(e) => e.key === "Enter" && doRefine()} />
+            <MicButton value={instr} onChange={(e) => setInstr(e.target.value)} />
+          </div>
           <button onClick={doRefine} disabled={busy} style={{ fontFamily: SAN, fontSize: 13, fontWeight: 700, color: C.cream, background: busy ? C.faint : C.ink, border: "none", borderRadius: 12, padding: "0 16px", cursor: busy ? "default" : "pointer" }}>{busy ? "…" : "regenerate"}</button>
         </div>
       )}
@@ -1817,7 +1887,10 @@ function OfferCompare() {
             <span style={{ fontFamily: SAN, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1.2, color: C.faint }}>Offer {String.fromCharCode(65 + i)}</span>
             {offers.length > 2 && <button onClick={() => removeOffer(o.id)} style={miniBtn(C.amberDeep)}>remove</button>}
           </div>
-          <textarea style={{ ...inputStyle, minHeight: 80 }} value={o.text} onChange={(e) => setText(o.id, e.target.value)} placeholder={i === 0 ? "Price $620k, conventional, 20% down, pre-approved. EM $12k. Inspection 7 days. Appraisal gap covered to $10k. Close 25 days." : "Paste this offer's key terms…"} />
+          <div style={{ position: "relative" }}>
+            <textarea style={{ ...inputStyle, minHeight: 80, paddingRight: 46 }} value={o.text} onChange={(e) => setText(o.id, e.target.value)} placeholder={i === 0 ? "Price $620k, conventional, 20% down, pre-approved. EM $12k. Inspection 7 days. Appraisal gap covered to $10k. Close 25 days." : "Paste this offer's key terms…"} />
+            <MicButton value={o.text} onChange={(e) => setText(o.id, e.target.value)} multiline />
+          </div>
         </div>
       ))}
       <button onClick={addOffer} style={{ fontFamily: SAN, fontSize: 13, fontWeight: 700, color: C.amber, background: "transparent", border: `1.5px dashed ${C.line}`, borderRadius: 12, padding: "8px 14px", cursor: "pointer", marginBottom: 16 }}>+ add another offer</button>
@@ -2275,7 +2348,7 @@ function App() {
   const meta = ALL.find((x) => x.id === tab);
   const Active = meta.el;
   const accent = (GROUPS.find((g) => g.tabs.some((tb) => tb.id === tab)) || {}).color || C.amber;
-  useEffect(() => { if (!styleRef.current) { const s = document.createElement("style"); s.textContent = FONTS + "@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}"; document.head.appendChild(s); styleRef.current = s; } }, []);
+  useEffect(() => { if (!styleRef.current) { const s = document.createElement("style"); s.textContent = FONTS + "@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}@keyframes micPulse{0%{box-shadow:0 0 0 0 rgba(209,52,44,.45)}70%{box-shadow:0 0 0 9px rgba(209,52,44,0)}100%{box-shadow:0 0 0 0 rgba(209,52,44,0)}}"; document.head.appendChild(s); styleRef.current = s; } }, []);
   useEffect(() => { (async () => { if (STORE_OK) { try { const r = await window.storage.get("closeassist-token"); if (r && r.value) { TOKEN = r.value; setAuthed(true); } } catch {} } setAuthChecked(true); })(); }, []);
   useEffect(() => {
     const onLogout = () => { setAuthed(false); };
