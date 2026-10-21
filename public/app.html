@@ -26,7 +26,7 @@ const { useState, useRef, useEffect, useContext, createContext } = React;
 
 // ─────────────────────────────────────────────────────────────
 // CloseAssist — an AI sales toolkit for real estate agents.
-// 17 tools across Outreach, Social Content, and Listings/Appointments.
+// 27 tools across Outreach, Social Content, Listings/Appointments, and Contracts & Signing.
 // A shared Brand profile flows into everything; results can be
 // refined in place, saved, spread across a week, and copied in bulk.
 // ─────────────────────────────────────────────────────────────
@@ -49,6 +49,9 @@ const API_GENERATE = "/api/generate";
 const API_ANALYZE = "/api/analyze";
 const API_LOGIN = "/api/login";
 const API_FUB = "/api/fub";
+// Non-secret client tag the app sends to its own backend. It keeps casual
+// scanners and curl scripts off the endpoints; it is NOT authentication.
+const APP_CLIENT = "closeassist-web";
 const FEEDBACK_EMAIL = "msozarealestate@gmail.com"; // testers' feedback goes here
 let TOKEN = "";
 // Bring-your-own Muse key: stored only on this device. When present,
@@ -58,6 +61,13 @@ function setMuseKey(v) { try { if (window.localStorage) { if (v) window.localSto
 // Zapier webhook for direct "Send to dotloop" (Catch Hook -> dotloop Create Loop). On-device only.
 function dotloopWebhook() { try { return window.localStorage.getItem("ca-zapier-dotloop") || ""; } catch (e) { return ""; } }
 function setDotloopWebhook(v) { try { if (v) window.localStorage.setItem("ca-zapier-dotloop", v); else window.localStorage.removeItem("ca-zapier-dotloop"); } catch (e) {} }
+// Per-agent Follow Up Boss key (same BYOK pattern as the Muse key): stored
+// only on this device. When present, FUB writes go to the agent's own FUB;
+// when absent they land in the CloseAssist account — and the UI says so
+// wherever FUB buttons appear.
+function fubKey() { try { return (window.localStorage && window.localStorage.getItem("ca-fub-key")) || ""; } catch (e) { return ""; } }
+function setFubKey(v) { try { if (window.localStorage) { if (v) window.localStorage.setItem("ca-fub-key", v); else window.localStorage.removeItem("ca-fub-key"); } } catch (e) {} }
+function fubDestLabel() { return fubKey() ? "your own Follow Up Boss account" : "the CloseAssist account — NOT your FUB (add your own FUB key in the \u2728 Muse drawer to use yours)"; }
 // Free-tier usage cap: FREE_CAP AI uses/month on the shared backend key (on-device counter).
 const FREE_CAP = 50;
 function usageInfo() {
@@ -94,7 +104,7 @@ async function askClaudeDirect(key, system, user) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1600, system: sysOut || undefined, messages: [{ role: "user", content: user }] }),
+    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 3200, system: sysOut || undefined, messages: [{ role: "user", content: user }] }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((data.error && data.error.message) || ("Request failed (" + res.status + ")"));
@@ -102,9 +112,12 @@ async function askClaudeDirect(key, system, user) {
 }
 
 async function fubCall(payload) {
+  const fh = { "Content-Type": "application/json", "x-app-token": TOKEN, "x-app-client": APP_CLIENT };
+  const fk = fubKey();
+  if (fk) fh["x-fub-key"] = fk;
   const res = await fetch(API_FUB, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-app-token": TOKEN },
+    headers: fh,
     body: JSON.stringify(payload),
   });
   const data = await res.json().catch(() => ({}));
@@ -124,8 +137,8 @@ async function askClaude(system, user) {
   if (usageInfo().n >= FREE_CAP) throw capError();
   const res = await fetch(API_GENERATE, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-app-token": TOKEN },
-    body: JSON.stringify({ system: sys2, user, max_tokens: 1600 }),
+    headers: { "Content-Type": "application/json", "x-app-token": TOKEN, "x-app-client": APP_CLIENT },
+    body: JSON.stringify({ system: sys2, user, max_tokens: 3200 }),
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) { TOKEN = ""; try { await window.storage.delete("closeassist-token"); } catch {} window.dispatchEvent(new Event("closeassist-logout")); throw new Error("Session expired — please log in again."); }
@@ -150,16 +163,45 @@ function brandContext(p) {
   return "\n\nAGENT BRANDING — weave these in naturally where appropriate (sign-offs, CTAs, post footers, signatures). Never invent contact details beyond what's listed: " + bits.join("; ") + ".";
 }
 
-function useTool() {
+// ── On-device persistence for drafts & tool state ─────────────
+// Brand, Saved items, and every tool's inputs and results are mirrored into
+// localStorage (key ca-toolstate-v1, one entry per field id) so a refresh, a
+// closed tab, or a phone evicting a background tab no longer wipes work in
+// progress. Storage failures (private mode, quota) degrade silently to the
+// old session-only behavior.
+const CA_DRAFT_KEY = "ca-toolstate-v1";
+let caDraftCache = null;
+function caDraftLoad() {
+  if (caDraftCache) return caDraftCache;
+  try { caDraftCache = JSON.parse(window.localStorage.getItem(CA_DRAFT_KEY) || "{}") || {}; } catch (e) { caDraftCache = {}; }
+  return caDraftCache;
+}
+function caDraftSave() { try { window.localStorage.setItem(CA_DRAFT_KEY, JSON.stringify(caDraftCache)); } catch (e) {} }
+function useP(id, init) {
+  const store = caDraftLoad();
+  const [v, setV] = useState(() => (Object.prototype.hasOwnProperty.call(store, id) ? store[id] : init));
+  const ref = useRef(v);
+  const set = (next) => {
+    const val = typeof next === "function" ? next(ref.current) : next;
+    ref.current = val; setV(val);
+    const s = caDraftLoad();
+    if (val === undefined) delete s[id]; else s[id] = val;
+    caDraftSave();
+  };
+  return [v, set];
+}
+
+function useTool(toolId) {
   const { profile } = useContext(ProfileCtx);
-  const [cards, setCards] = useState(null);
+  const [cards, setCards] = useP(toolId + ".cards", null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const sysRef = useRef("");
+  const sysRef = useRef(caDraftLoad()[toolId + ".sys"] || "");
 
   const generate = async (system, user) => {
     const full = system + brandContext(profile);
     setLoading(true); setError(""); setCards(null); sysRef.current = full;
+    { const s = caDraftLoad(); s[toolId + ".sys"] = full; caDraftSave(); }
     try { setCards(toCards(await askClaude(full, user))); }
     catch (e) { setError(e.message || "Something went wrong."); }
     finally { setLoading(false); }
@@ -277,9 +319,9 @@ function RunButton({ onClick, loading, children }) {
 }
 
 function LogNotePanel({ text, noun }) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
+  const [name, setName] = useP("fubnote.name", "");
+  const [email, setEmail] = useP("fubnote.email", "");
+  const [phone, setPhone] = useP("fubnote.phone", "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [done, setDone] = useState("");
@@ -302,6 +344,7 @@ function LogNotePanel({ text, noun }) {
       {err && <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.amberDeep, margin: "0 0 8px" }}>{err}</p>}
       {done && <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.moss, fontWeight: 600, margin: "0 0 8px" }}>{done}</p>}
       <button onClick={send} disabled={busy} style={{ fontFamily: SAN, fontSize: 12.5, fontWeight: 700, color: "#fff", background: busy ? C.faint : C.moss, border: "none", borderRadius: 12, padding: "8px 14px", cursor: busy ? "default" : "pointer" }}>{busy ? "Logging\u2026" : "Log this draft in FUB"}</button>
+      <p style={{ fontFamily: SAN, fontSize: 11.5, color: C.faint, lineHeight: 1.5, margin: "8px 0 0" }}>Logs into {fubDestLabel()}.</p>
     </div>
   );
 }
@@ -352,7 +395,7 @@ function Results({ cards, error, noun = "option", onRefine }) {
 
 // ============ OUTREACH ============
 function FollowUp() {
-  const [name, setName] = useState(""); const [ctx, setCtx] = useState(""); const [channel, setChannel] = useState("Text"); const [tone, setTone] = useState("Warm"); const t = useTool();
+  const [name, setName] = useP("follow.name", ""); const [ctx, setCtx] = useP("follow.ctx", ""); const [channel, setChannel] = useP("follow.channel", "Text"); const [tone, setTone] = useP("follow.tone", "Warm"); const t = useTool("follow");
   const run = () => { if (!ctx.trim()) return t.setError("Tell me a bit about the lead first.");
     t.generate("You are an elite real estate sales coach writing follow-up messages for an agent. Natural, human, non-pushy messages that move things forward and invite a reply. Keep " + channel.toLowerCase() + "s brief. Tone: " + tone + ". Return exactly 3 distinct messages separated by a line containing only ===. No preamble or labels.", "Lead name: " + (name || "(unknown)") + "\nChannel: " + channel + "\nSituation:\n" + ctx); };
   return (<div>
@@ -368,7 +411,7 @@ function FollowUp() {
 }
 
 function Objection() {
-  const [obj, setObj] = useState(""); const t = useTool();
+  const [obj, setObj] = useP("obj.text", ""); const t = useTool("obj");
   const presets = ["We want to wait until prices come down.", "Your commission is too high.", "We're going to try selling it ourselves first.", "We need to think about it."];
   const run = () => { if (!obj.trim()) return t.setError("Paste the objection you're hearing.");
     t.generate("You are a master real estate sales coach. The agent pastes a client objection. Give 3 genuinely different responses (empathize & reframe / ask a clarifying question / address head-on with value). Each sayable almost verbatim, confident, never slimy. Start each with a 2-4 word strategy label in brackets. Separate the 3 with a line containing only ===.", "Objection: " + obj); };
@@ -382,7 +425,7 @@ function Objection() {
 }
 
 function Warmup() {
-  const [list, setList] = useState(""); const [angle, setAngle] = useState("Check in"); const t = useTool();
+  const [list, setList] = useP("warm.list", ""); const [angle, setAngle] = useP("warm.angle", "Check in"); const t = useTool("warm");
   const run = () => { const lines = list.split("\n").map((l) => l.trim()).filter(Boolean);
     if (!lines.length) return t.setError("Paste at least one lead — one per line.");
     if (lines.length > 12) return t.setError("Keep it to 12 leads per batch so each message gets real attention.");
@@ -397,7 +440,7 @@ function Warmup() {
 }
 
 function Referral() {
-  const [who, setWho] = useState("Past client"); const [ctx, setCtx] = useState(""); const [channel, setChannel] = useState("Text"); const t = useTool();
+  const [who, setWho] = useP("ref.who", "Past client"); const [ctx, setCtx] = useP("ref.ctx", ""); const [channel, setChannel] = useP("ref.channel", "Text"); const t = useTool("ref");
   const run = () => { t.generate("You are a real estate relationship coach. Write warm, low-pressure referral-ask messages that don't feel transactional — lead with genuine connection, then a soft ask for who they might know thinking of buying/selling. Audience: " + who + ". Channel: " + channel + ". Return 3 distinct versions separated by a line containing only ===.", "Audience: " + who + "\nAny context: " + (ctx || "(none)")); };
   return (<div>
     <Field label="Who are you asking?"><Chips options={["Past client", "Friend / sphere", "Recent buyer", "Recent seller"]} value={who} onChange={setWho} /></Field>
@@ -410,7 +453,7 @@ function Referral() {
 }
 
 function Voicemail() {
-  const [scenario, setScenario] = useState("Expired listing"); const [name, setName] = useState(""); const [ctx, setCtx] = useState(""); const t = useTool();
+  const [scenario, setScenario] = useP("vm.scenario", "Expired listing"); const [name, setName] = useP("vm.name", ""); const [ctx, setCtx] = useP("vm.ctx", ""); const t = useTool("vm");
   const run = () => { t.generate("You are a real estate cold-outreach coach. Produce a matched pair for this scenario: a 15-20 second VOICEMAIL script (natural, confident, leaves a reason to call back) and a paired FOLLOW-UP TEXT to send right after. Two sections, each starting with a bracketed label [Voicemail Script] then [Follow-Up Text], separated by a line containing only ===. Scenario: " + scenario + ".", "Scenario: " + scenario + "\nName: " + (name || "(unknown)") + "\nContext: " + (ctx || "(none)")); };
   return (<div>
     <Field label="Scenario"><Chips options={["Expired listing", "FSBO", "Cold lead", "Open-house follow-up", "Past client check-in"]} value={scenario} onChange={setScenario} /></Field>
@@ -423,7 +466,7 @@ function Voicemail() {
 }
 
 function Review() {
-  const [name, setName] = useState(""); const [deal, setDeal] = useState("Helped them buy"); const [platform, setPlatform] = useState("Google"); const t = useTool();
+  const [name, setName] = useP("rev.name", ""); const [deal, setDeal] = useP("rev.deal", "Helped them buy"); const [platform, setPlatform] = useP("rev.platform", "Google"); const t = useTool("rev");
   const run = () => { t.generate("You are a real estate client-experience coach. Write warm, specific, easy-yes review-request messages for " + platform + ". Reference the journey, make it effortless, include a clear spot for the review link as [REVIEW LINK]. Transaction: " + deal + ". Return 3 distinct versions separated by a line containing only ===.", "Client: " + (name || "(client)") + "\nTransaction: " + deal + "\nPlatform: " + platform); };
   return (<div>
     <Field label="Client's name (optional)"><input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Sam" /></Field>
@@ -437,7 +480,7 @@ function Review() {
 
 // ============ SOCIAL CONTENT ============
 function Content() {
-  const [topic, setTopic] = useState(""); const [platform, setPlatform] = useState("Instagram"); const t = useTool();
+  const [topic, setTopic] = useP("content.topic", ""); const [platform, setPlatform] = useP("content.platform", "Instagram"); const t = useTool("content");
   const run = () => { if (!topic.trim()) return t.setError("Give me a topic or angle to post about.");
     t.generate("You are a real estate social media strategist. Write 3 ready-to-post " + platform + " posts on the topic. Match platform voice/length. Strong hook, real value, soft CTA, tasteful line breaks, a few relevant hashtags where expected. Separate the 3 with a line containing only ===.", "Topic: " + topic + "\nPlatform: " + platform); };
   return (<div>
@@ -450,7 +493,7 @@ function Content() {
 }
 
 function Engagement() {
-  const [offer, setOffer] = useState(""); const [keyword, setKeyword] = useState(""); const [action, setAction] = useState("Comment below"); const [dest, setDest] = useState(""); const [platform, setPlatform] = useState("Instagram"); const t = useTool();
+  const [offer, setOffer] = useP("engage.offer", ""); const [keyword, setKeyword] = useP("engage.keyword", ""); const [action, setAction] = useP("engage.action", "Comment below"); const [dest, setDest] = useP("engage.dest", ""); const [platform, setPlatform] = useP("engage.platform", "Instagram"); const t = useTool("engage");
   const run = () => { if (!offer.trim()) return t.setError("What are people getting? Describe the offer / lead magnet.");
     if (!keyword.trim()) return t.setError("Give me the trigger word people should send.");
     const how = action === "Text a keyword" ? "they TEXT the word \"" + keyword + "\"" + (dest ? " to " + dest : "") : action === "DM the keyword" ? "they DM the word \"" + keyword + "\"" : "they COMMENT the word \"" + keyword + "\" below";
@@ -476,7 +519,7 @@ const MILESTONES = {
   "New Listing": "A coming-soon / new-to-market teaser. Create anticipation before it's live, invite people to ask for a preview.",
 };
 function Milestone() {
-  const [type, setType] = useState("Just Listed"); const [details, setDetails] = useState(""); const [platform, setPlatform] = useState("Instagram"); const t = useTool();
+  const [type, setType] = useP("mile.type", "Just Listed"); const [details, setDetails] = useP("mile.details", ""); const [platform, setPlatform] = useP("mile.platform", "Instagram"); const t = useTool("mile");
   const run = () => { if (!details.trim()) return t.setError("Add the property / deal details for the post.");
     t.generate("You are a real estate social media strategist creating '" + type + "' announcement posts for " + platform + ". " + MILESTONES[type] + " Match platform voice/length, scroll-stopping first line, tasteful line breaks, an emoji or two if on-brand, 4-7 relevant hashtags. Stay truthful, avoid fair-housing-risky language. Return 3 distinct versions separated by a line containing only ===.", "Milestone: " + type + "\nPlatform: " + platform + "\nDetails:\n" + details); };
   return (<div>
@@ -490,7 +533,7 @@ function Milestone() {
 }
 
 function ReelHooks() {
-  const [topic, setTopic] = useState(""); const t = useTool();
+  const [topic, setTopic] = useP("hooks.topic", ""); const t = useTool("hooks");
   const run = () => { if (!topic.trim()) return t.setError("Give me a topic for the hooks.");
     t.generate("You are a short-form video expert for real estate agents. Write 10 scroll-stopping opening HOOKS (first lines for a Reel/TikTok) on the topic — varied styles (bold claim, question, mistake callout, number, contrarian, story tease). One hook each, no numbering, separated by a line containing only ===.", "Topic: " + topic); };
   return (<div>
@@ -502,7 +545,7 @@ function ReelHooks() {
 }
 
 function ThisOrThat() {
-  const [theme, setTheme] = useState(""); const [platform, setPlatform] = useState("Instagram"); const t = useTool();
+  const [theme, setTheme] = useP("tot.theme", ""); const [platform, setPlatform] = useP("tot.platform", "Instagram"); const t = useTool("tot");
   const run = () => { t.generate("You are a real estate engagement specialist. Write 3 'this or that' style poll/engagement posts for " + platform + " that get people commenting (e.g. design, neighborhoods, buy vs rent, home features). Each: a punchy this-vs-that prompt, a line of personality, and a clear 'comment your pick' CTA. Tasteful hashtags. Separate the 3 with a line containing only ===.", "Theme/angle: " + (theme || "general home & lifestyle") + "\nPlatform: " + platform); };
   return (<div>
     <Field label="Theme (optional)"><input style={inputStyle} value={theme} onChange={(e) => setTheme(e.target.value)} placeholder="kitchen styles, city vs suburbs, fixer vs move-in ready…" /></Field>
@@ -514,7 +557,7 @@ function ThisOrThat() {
 }
 
 function MarketUpdate() {
-  const [area, setArea] = useState(""); const [stats, setStats] = useState(""); const [format, setFormat] = useState("Social post"); const t = useTool();
+  const [area, setArea] = useP("market.area", ""); const [stats, setStats] = useP("market.stats", ""); const [format, setFormat] = useP("market.format", "Social post"); const t = useTool("market");
   const run = () => { if (!stats.trim()) return t.setError("Paste a few market stats or notes to work from.");
     t.generate("You are a real estate market analyst and content writer. Turn the agent's local stats/notes into a clear, confident " + format + " that positions them as the local expert. Translate numbers into what they MEAN for buyers and sellers, end with a soft CTA to reach out. Only use the data given — do not invent figures. Return 3 distinct versions separated by a line containing only ===.", "Area: " + (area || "(local market)") + "\nFormat: " + format + "\nStats/notes:\n" + stats); };
   return (<div>
@@ -528,7 +571,7 @@ function MarketUpdate() {
 }
 
 function Newsletter() {
-  const [include, setInclude] = useState(""); const [tone, setTone] = useState("Friendly"); const t = useTool();
+  const [include, setInclude] = useP("news.include", ""); const [tone, setTone] = useP("news.tone", "Friendly"); const t = useTool("news");
   const run = () => { if (!include.trim()) return t.setError("Tell me what to include this issue.");
     t.generate("You are a real estate email copywriter. Write a complete monthly newsletter email from the agent's notes. Start with 'Subject: ' then a compelling subject line, then the body: a warm intro, the content sections, and a clear CTA. Scannable, valuable, not salesy. Tone: " + tone + ". Return 2 distinct versions separated by a line containing only ===.", "Include this issue:\n" + include); };
   return (<div>
@@ -542,9 +585,9 @@ function Newsletter() {
 
 // ============ LISTINGS & APPOINTMENTS ============
 function ListingPresentation() {
-  const [d, setD] = useState({ address: "", seller: "", price: "", comps: "", marketing: "", why: "" });
+  const [d, setD] = useP("listpres.d", { address: "", seller: "", price: "", comps: "", marketing: "", why: "" });
   const set = (k, v) => setD((p) => ({ ...p, [k]: v }));
-  const t = useTool();
+  const t = useTool("listpres");
   const run = () => {
     if (!d.address.trim()) return t.setError("Add at least the property address.");
     const facts = [
@@ -576,11 +619,11 @@ function ListingPresentation() {
 const LISTPRES_SYSTEM = "You are an expert listing agent's assistant building a LISTING PRESENTATION the agent will deliver to win a seller's business. Using only the details provided, produce a clean, professional, sectioned document with these parts, each with a clear header:\n1. COVER / OPENING — a warm, confident intro addressed to the seller(s), establishing you understand their goal of selling for top dollar with the least stress.\n2. UNDERSTANDING YOUR HOME — a short, flattering but honest framing of the property.\n3. PRICING STRATEGY — explain the suggested price/range using the comps/market context given, in plain English; note the strategy and what drives it. Do not invent comps not provided.\n4. MARKETING PLAN — turn the agent's marketing highlights into a compelling, organized plan (photography/staging, online exposure, open houses, database, paid promotion). If the agent gave few details, present a strong standard plan but don't fabricate specific claims.\n5. WHY [AGENT] — build credibility from the differentiators given (use the agent's brand details). Never invent statistics that weren't provided.\n6. WHAT HAPPENS NEXT — clear next steps and a confident call to sign.\nKeep it polished, client-ready, and persuasive without hype. Use the agent's brand/name where natural. This is a working draft for the agent to review and personalize. Return as one document with the numbered section headers; do not use === separators.";
 
 function CMABuilder() {
-  const [side, setSide] = useState("Seller (pricing a listing)");
-  const [subject, setSubject] = useState("");
-  const [comps, setComps] = useState("");
-  const [goal, setGoal] = useState("Balanced (market value)");
-  const t = useTool();
+  const [side, setSide] = useP("cma.side", "Seller (pricing a listing)");
+  const [subject, setSubject] = useP("cma.subject", "");
+  const [comps, setComps] = useP("cma.comps", "");
+  const [goal, setGoal] = useP("cma.goal", "Balanced (market value)");
+  const t = useTool("cma");
 
   const run = () => {
     if (!subject.trim()) return t.setError("Add the subject property details first.");
@@ -619,7 +662,7 @@ function CMABuilder() {
 const CMA_SYSTEM = "You are an expert real estate pricing analyst helping a licensed agent prepare a Comparative Market Analysis (CMA). The agent provides the subject property and a set of comparable sales they pulled from the MLS. Use ONLY the comps and details provided — never invent comps, prices, or market data you were not given. Produce ONE clear document with these sections:\n\n=== 1. COMP COMPARISON ===\nA tidy side-by-side of the subject vs each comp (price, beds/baths, sqft, sale date, condition/notes). Point out in plain English how each comp differs from the subject and which direction that pushes value (e.g., 'larger lot — adjust subject up', 'no finished basement — adjust down'). Do NOT fabricate exact dollar adjustments unless the math clearly follows from the data; describe direction and rough magnitude instead.\n\n=== 2. SUGGESTED PRICE RANGE ===\nGive a recommended range and a single suggested figure, with the reasoning tied to the comps. Note the price-per-sqft picture if sqft is provided. Be honest about uncertainty when comps are thin or inconsistent.\n\n=== 3. PRICING STRATEGY ===\nTie the recommendation to the agent's stated pricing goal (sell fast / balanced / list high). Explain the tradeoffs of the chosen approach and what to watch (days on market, appraisal risk if listing high, etc.). For a buyer-side analysis, instead advise whether the target price is supported and how aggressive an offer the comps justify.\n\n=== 4. CLIENT-READY SUMMARY ===\nA warm, clear narrative the agent can put straight into a listing presentation or send to the client — what the home is worth and why, in everyday language, confident but not pushy.\n\nRules: Use only provided data. This analysis informs the agent's judgment and is NOT a formal appraisal; the agent sets the final price. Keep it tight and usable. Separate sections with the === headers exactly as shown and use no other === separators.";
 
 function Listing() {
-  const [details, setDetails] = useState(""); const [style, setStyle] = useState("Polished"); const [length, setLength] = useState("Standard"); const t = useTool();
+  const [details, setDetails] = useP("listing.details", ""); const [style, setStyle] = useP("listing.style", "Polished"); const [length, setLength] = useP("listing.length", "Standard"); const t = useTool("listing");
   const run = () => { if (!details.trim()) return t.setError("Give me the property details to work from.");
     t.generate("You are a top-producing real estate copywriter. Write compelling MLS-style listing descriptions from the agent's notes. Lead with the strongest selling point, paint a lifestyle, stay truthful (never invent features), end with a light CTA. Style: " + style + ". Length: " + length + " (Short ~50 words, Standard ~100, Detailed ~160). Avoid fair-housing-risky language. Return 3 distinct versions separated by a line containing only ===.", "Property details:\n" + details); };
   return (<div>
@@ -634,7 +677,7 @@ function Listing() {
 }
 
 function PriceReduced() {
-  const [details, setDetails] = useState(""); const [platform, setPlatform] = useState("Instagram"); const t = useTool();
+  const [details, setDetails] = useP("price.details", ""); const [platform, setPlatform] = useP("price.platform", "Instagram"); const t = useTool("price");
   const run = () => { if (!details.trim()) return t.setError("Add the property + the price change.");
     t.generate("You are a real estate marketer. Write price-improvement posts that reframe a reduction as fresh OPPORTUNITY and urgency — never desperation. Emphasize value, motivated seller, act-now angle. Match " + platform + " voice/length, tasteful hashtags. Stay truthful, avoid fair-housing-risky language. Return 3 distinct versions separated by a line containing only ===.", "Platform: " + platform + "\nDetails:\n" + details); };
   return (<div>
@@ -647,7 +690,7 @@ function PriceReduced() {
 }
 
 function OpenHouse() {
-  const [prop, setProp] = useState(""); const [buyer, setBuyer] = useState(""); const t = useTool();
+  const [prop, setProp] = useP("open.prop", ""); const [buyer, setBuyer] = useP("open.buyer", ""); const t = useTool("open");
   const run = () => { if (!prop.trim()) return t.setError("Tell me about the property you're hosting.");
     t.generate("You are a real estate sales coach building an open-house game plan to run today. Produce 5 sections, each starting with a bracketed label, in order: [The Greeting] a natural welcome + one opening question; [Walkthrough Talking Points] 3-4 specific highlights; [Capturing Their Info] a smooth low-pressure way to get name/number/timeline; [Reading the Room] tells for hot vs lukewarm visitors and what to do; [Same-Day Follow-Up] a text to send that evening. Sayable out loud. Separate the 5 with a line containing only ===.", "Property: " + prop + "\nLikely buyer: " + (buyer || "(open — mixed traffic)")); };
   return (<div>
@@ -660,7 +703,7 @@ function OpenHouse() {
 }
 
 function ConsultPrep() {
-  const [type, setType] = useState("Listing appointment"); const [ctx, setCtx] = useState(""); const t = useTool();
+  const [type, setType] = useP("prep.type", "Listing appointment"); const [ctx, setCtx] = useP("prep.ctx", ""); const t = useTool("prep");
   const run = () => { if (!ctx.trim()) return t.setError("Give me the property or client context.");
     t.generate("You are a real estate sales coach prepping the agent for a " + type + ". Produce 4 sections, each starting with a bracketed label: [Talking Points] what to lead with and your value story; [Smart Questions] sharp questions to understand their needs and motivation; [Likely Objections] 2-3 you may hear and a confident one-liner for each; [Your Close] how to ask for the business at the end. Practical and specific to the context. Separate the 4 with a line containing only ===.", "Type: " + type + "\nContext:\n" + ctx); };
   return (<div>
@@ -674,15 +717,21 @@ function ConsultPrep() {
 
 function DeadlineFub({ milestones, addr }) {
   const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [name, setName] = useP("fubtasks.name", "");
+  const [email, setEmail] = useP("fubtasks.email", "");
+  const [sent, setSent] = useP("fubtasks.sent", {});
+  const keyOf = (m) => (addr || "") + "|" + m.label + "|" + ymd(m.date);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [done, setDone] = useState("");
   const send = async () => {
-    setErr(""); setDone(""); setBusy(true);
-    try {
-      for (const m of milestones) {
+    setErr(""); setDone("");
+    const todo = milestones.filter((m) => !sent[keyOf(m)]);
+    if (!todo.length) { setDone("All " + milestones.length + " tasks were already sent to FUB \u2713"); return; }
+    setBusy(true);
+    let created = 0; const failed = [];
+    for (const m of todo) {
+      try {
         await fubCall({
           action: "task",
           name: name.trim() || undefined,
@@ -691,9 +740,13 @@ function DeadlineFub({ milestones, addr }) {
           dueDate: ymd(m.date),
           notes: m.note,
         });
-      }
-      setDone("Created " + milestones.length + " tasks in FUB \u2713");
-    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+        setSent((s) => ({ ...s, [keyOf(m)]: true }));
+        created++;
+      } catch (e) { failed.push(m.label); }
+    }
+    setBusy(false);
+    if (failed.length) setErr("Created " + created + " task" + (created === 1 ? "" : "s") + "; couldn't create: " + failed.join(", ") + ". Tap Create again to retry just those — already-sent tasks won't duplicate.");
+    else setDone("Created " + created + " tasks in FUB \u2713" + (milestones.length > created ? " (" + (milestones.length - created) + " were already sent earlier)" : ""));
   };
   if (!open) {
     return <button onClick={() => setOpen(true)} style={{ fontFamily: SAN, fontSize: 13.5, fontWeight: 700, color: "#fff", background: C.moss, border: "none", borderRadius: 12, padding: "11px 18px", cursor: "pointer" }}>Send to FUB as tasks</button>;
@@ -704,7 +757,7 @@ function DeadlineFub({ milestones, addr }) {
         <span style={{ fontFamily: SER, fontWeight: 700, fontSize: 17, color: C.ink }}>Deadlines → FUB tasks</span>
         <button onClick={() => setOpen(false)} style={{ fontFamily: SAN, fontSize: 12, color: C.faint, background: "none", border: "none", cursor: "pointer" }}>close \u2715</button>
       </div>
-      <p style={{ fontFamily: SAN, fontSize: 12, color: C.faint, lineHeight: 1.5, marginTop: 0, marginBottom: 12 }}>Creates one task per deadline{milestones.length ? (" (" + milestones.length + ")") : ""}, each with its due date. Attach to a contact (optional).</p>
+      <p style={{ fontFamily: SAN, fontSize: 12, color: C.faint, lineHeight: 1.5, marginTop: 0, marginBottom: 12 }}>Creates one task per deadline{milestones.length ? (" (" + milestones.length + ")") : ""}, each with its due date. Attach to a contact (optional). Tasks are created in {fubDestLabel()}.</p>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
         <input style={{ ...inputStyle, flex: "1 1 140px", fontSize: 13 }} value={name} onChange={(e) => setName(e.target.value)} placeholder="Contact name (optional)" />
         <input style={{ ...inputStyle, flex: "1 1 160px", fontSize: 13 }} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email (optional)" />
@@ -717,30 +770,57 @@ function DeadlineFub({ milestones, addr }) {
 }
 
 function DeadlineTracker() {
-  const [accept, setAccept] = useState("");
-  const [closing, setClosing] = useState("");
-  const [addr, setAddr] = useState("");
+  const [accept, setAccept] = useP("deadlines.accept", "");
+  const [closing, setClosing] = useP("deadlines.closing", "");
+  const [addr, setAddr] = useP("deadlines.addr", "");
+  const [emDays, setEmDays] = useP("deadlines.emdays", "5");
 
+  // Business days skip weekends AND US federal holidays, matching the 8.0's
+  // counting. Fixed-date holidays plus nth-weekday rules; observed-day shifts
+  // (a holiday falling on a weekend) are not applied.
+  const HOLI_CACHE = {};
+  const holidaysFor = (year) => {
+    if (HOLI_CACHE[year]) return HOLI_CACHE[year];
+    const S = new Set();
+    const put = (dt) => S.add(ymd(dt));
+    put(new Date(year, 0, 1)); put(new Date(year, 5, 19)); put(new Date(year, 6, 4));
+    put(new Date(year, 10, 11)); put(new Date(year, 11, 25));
+    const nth = (m, wd, n) => { const first = new Date(year, m, 1); return new Date(year, m, 1 + ((wd - first.getDay() + 7) % 7) + (n - 1) * 7); };
+    const last = (m, wd) => { const endD = new Date(year, m + 1, 0); return new Date(year, m, endD.getDate() - ((endD.getDay() - wd + 7) % 7)); };
+    put(nth(0, 1, 3)); put(nth(1, 1, 3)); put(last(4, 1));
+    put(nth(8, 1, 1)); put(nth(9, 1, 2)); put(nth(10, 4, 4));
+    HOLI_CACHE[year] = S;
+    return S;
+  };
+  const isBizDay = (d) => { const dow = d.getDay(); return dow !== 0 && dow !== 6 && !holidaysFor(d.getFullYear()).has(ymd(d)); };
   const addCalDays = (base, days) => { const d = new Date(base + "T00:00:00"); d.setDate(d.getDate() + days); return d; };
   const addBizDays = (base, days) => {
-    const d = new Date(base + "T00:00:00"); let added = 0;
-    while (added < days) { d.setDate(d.getDate() + 1); const dow = d.getDay(); if (dow !== 0 && dow !== 6) added++; }
+    const d = new Date(base + "T00:00:00");
+    const step = days < 0 ? -1 : 1;
+    let remaining = Math.abs(days);
+    while (remaining > 0) { d.setDate(d.getDate() + step); if (isBizDay(d)) remaining--; }
     return d;
   };
   const fmt = (d) => d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
 
   const milestones = accept ? (() => {
-    const list = [
+    const list = [];
+    const emN = parseInt(emDays, 10);
+    if (isFinite(emN) && emN > 0) list.push({ label: "Earnest money due", date: addBizDays(accept, emN), note: "Para 3 — " + emN + " business days after acceptance" });
+    list.push(
       { label: "Attorney Review ends", date: addBizDays(accept, 5), note: "Para 13 — 5 business days" },
       { label: "Inspection notice due", date: addBizDays(accept, 5), note: "Para 15 — typically 5 business days" },
-      { label: "Homeowner insurance contingency", date: addBizDays(accept, 10), note: "Para 9 — 10 business days" },
-      { label: "Financing approval (contingency date)", date: addCalDays(accept, 45), note: "Para 8 — 45 calendar days (or 5 biz days before closing, whichever earlier)" },
-    ];
+      { label: "Homeowner insurance contingency", date: addBizDays(accept, 10), note: "Para 9 — 10 business days" }
+    );
+    // Para 8: 45 calendar days, or 5 business days before closing — whichever is EARLIER.
+    let finDate = addCalDays(accept, 45);
+    let finNote = "Para 8 — 45 calendar days";
     if (closing) {
       const fiveBefore = addBizDays(closing, -5);
+      if (fiveBefore < finDate) { finDate = fiveBefore; finNote = "Para 8 — 5 business days before closing (earlier than the 45-day date)"; }
       list.push({ label: "Closing", date: new Date(closing + "T00:00:00"), note: "Para 5" });
-      void fiveBefore;
     }
+    list.push({ label: "Financing approval (contingency date)", date: finDate, note: finNote });
     return list.sort((a, b) => a.date - b.date);
   })() : [];
 
@@ -757,13 +837,16 @@ function DeadlineTracker() {
 
   return (<div>
     <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 12, padding: "11px 14px", marginBottom: 18 }}>
-      <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Enter the date of acceptance and it maps the key Multi-Board 8.0 deadlines (attorney review, inspection, insurance, financing). Export them to your calendar with reminders. <b>Estimate — always verify against the executed contract.</b></p>
+      <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Enter the date of acceptance and it maps the key Multi-Board 8.0 deadlines (earnest money, attorney review, inspection, insurance, financing). Business days skip weekends and US federal holidays. Export them to your calendar with reminders. <b>Estimate — always verify against the executed contract.</b></p>
     </div>
     <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
       <div style={{ flex: "1 1 150px" }}><Field label="Date of Acceptance"><input type="date" style={inputStyle} value={accept} onChange={(e) => setAccept(e.target.value)} /></Field></div>
       <div style={{ flex: "1 1 150px" }}><Field label="Closing date (optional)"><input type="date" style={inputStyle} value={closing} onChange={(e) => setClosing(e.target.value)} /></Field></div>
     </div>
-    <Field label="Property (optional)"><input style={inputStyle} value={addr} onChange={(e) => setAddr(e.target.value)} placeholder="123 Oak St" /></Field>
+    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      <div style={{ flex: "2 1 220px" }}><Field label="Property (optional)"><input style={inputStyle} value={addr} onChange={(e) => setAddr(e.target.value)} placeholder="123 Oak St" /></Field></div>
+      <div style={{ flex: "1 1 170px" }}><Field label="Earnest money due (biz days)"><input style={inputStyle} value={emDays} onChange={(e) => setEmDays(e.target.value)} placeholder="5" /></Field></div>
+    </div>
 
     {milestones.length > 0 && <div style={{ marginTop: 14, border: `2px solid ${C.ink}`, borderRadius: 16, overflow: "hidden" }}>
       <div style={{ background: C.ink, color: "#fff", padding: "10px 14px", fontFamily: SER, fontWeight: 700, fontSize: 16 }}>Key Deadlines</div>
@@ -786,7 +869,7 @@ function DeadlineTracker() {
 }
 
 function SellerNetSheet() {
-  const [f, setF] = useState({
+  const [f, setF] = useP("netsheet.f", {
     brokerage: "", address: "", city: "", county: "",
     price: "", loanPayoff: "", commPct: "6", commFlat: "",
     annualTax: "", taxProrationMonths: "", attorney: "750",
@@ -810,12 +893,18 @@ function SellerNetSheet() {
   // IL transfer tax formulas (defaults; editable). State $0.50 / $500, County $0.25 / $500.
   const stateStamp = has(f.transferState) ? num(f.transferState) : (price ? Math.ceil(price / 500) * 0.5 : 0);
   const countyStamp = has(f.transferCounty) ? num(f.transferCounty) : (price ? Math.ceil(price / 500) * 0.25 : 0);
-  const cityStamp = num(f.transferCity); // city stamp varies wildly; only if entered/AI-filled
+  // Chicago: the seller customarily pays the CTA portion of the city transfer
+  // tax — $1.50 per $500 — so default it in instead of silently using $0.
+  const isChicago = /chicago/i.test(f.city || "");
+  const cityStamp = has(f.transferCity) ? num(f.transferCity) : (isChicago && price ? Math.ceil(price / 500) * 1.5 : 0);
+  const cityStampAuto = !has(f.transferCity) && isChicago && !!price;
 
   const commission = has(f.commFlat) ? num(f.commFlat) : (price && has(f.commPct) ? price * num(f.commPct) / 100 : 0);
 
-  // Tax proration: months of the year owed × (annual/12), agent enters months.
-  const taxProration = (has(f.annualTax) && has(f.taxProrationMonths)) ? num(f.annualTax) / 12 * num(f.taxProrationMonths) : 0;
+  // Tax proration: months owed × (annual/12), agent enters months. Cook County
+  // convention prorates at 105% of the last full tax bill — apply 1.05 there.
+  const isCook = /cook/i.test(f.county || "");
+  const taxProration = (has(f.annualTax) && has(f.taxProrationMonths)) ? num(f.annualTax) / 12 * num(f.taxProrationMonths) * (isCook ? 1.05 : 1) : 0;
 
   const lineVals = {
     commission,
@@ -880,11 +969,11 @@ function SellerNetSheet() {
     add("Owner's Title Insurance", lineVals.title);
     add("State Transfer Tax", stateStamp);
     add("County Transfer Tax", countyStamp);
-    add("City/Municipal Transfer Tax", cityStamp);
+    add("City/Municipal Transfer Tax" + (cityStampAuto ? " (Chicago — seller CTA share $1.50/$500)" : ""), cityStamp);
     add("Recording Fees", lineVals.recording);
     add("Settlement / Closing Fee", lineVals.settlement);
     add("Survey", lineVals.survey);
-    add("Property Tax Proration" + (has(f.taxProrationMonths) ? " (" + num(f.taxProrationMonths) + " mo)" : ""), taxProration);
+    add("Property Tax Proration" + (has(f.taxProrationMonths) ? " (" + num(f.taxProrationMonths) + " mo" + (isCook ? ", Cook Co. 105% of last bill" : "") + ")" : ""), taxProration);
     add("Seller Credit to Buyer", lineVals.sellerCredit);
     add("HOA / Association Dues", lineVals.hoa);
     add("Other Liens / Judgments", lineVals.otherLiens);
@@ -906,7 +995,7 @@ function SellerNetSheet() {
 
   return (<div>
     <div style={{ background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.moss}`, borderRadius: 12, padding: "11px 14px", marginBottom: 18 }}>
-      <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Illinois seller net sheet. You enter the deal numbers; tap <b>Estimate with AI</b> to fill typical title/recording/settlement costs, then override anything. State & county transfer taxes auto-calculate. Every line is editable. <b>Estimate only — confirm with your title company.</b></p>
+      <p style={{ fontFamily: SAN, fontSize: 12.5, color: C.faint, lineHeight: 1.5, margin: 0 }}>Illinois seller net sheet. You enter the deal numbers; tap <b>Estimate with AI</b> to fill typical title/recording/settlement costs, then override anything. State & county transfer taxes auto-calculate, Chicago sales include the seller's CTA transfer-tax share, and Cook County prorations use the 105% convention. Every line is editable. <b>Estimate only — confirm with your title company.</b></p>
     </div>
 
     <Field label="Your brokerage (shown on the sheet)"><input style={inputStyle} value={f.brokerage} onChange={(e) => set("brokerage", e.target.value)} placeholder="e.g. Smart Home Realty" /></Field>
@@ -953,7 +1042,7 @@ function SellerNetSheet() {
       {fld("Survey", "survey", "AI / enter")}
     </div>
     <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-      {fld("City/Municipal Transfer Tax", "transferCity", "AI / enter (0 if none)")}
+      {fld("City/Municipal Transfer Tax", "transferCity", "Chicago auto-defaults; else AI / enter")}
       {fld("Miscellaneous", "misc", "AI / enter")}
     </div>
     <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -974,11 +1063,11 @@ function SellerNetSheet() {
         {row("Owner's Title Insurance", lineVals.title, false, true)}
         {row("State Transfer Tax", stateStamp, false, true)}
         {row("County Transfer Tax", countyStamp, false, true)}
-        {row("City/Municipal Transfer Tax", cityStamp, false, true)}
+        {row("City/Municipal Transfer Tax" + (cityStampAuto ? " (Chicago auto)" : ""), cityStamp, false, true)}
         {row("Recording Fees", lineVals.recording, false, true)}
         {row("Settlement / Closing Fee", lineVals.settlement, false, true)}
         {row("Survey", lineVals.survey, false, true)}
-        {row("Property Tax Proration", taxProration, false, true)}
+        {row("Property Tax Proration" + (isCook && taxProration ? " (Cook Co. 105%)" : ""), taxProration, false, true)}
         {row("Seller Credit to Buyer", lineVals.sellerCredit, false, true)}
         {row("HOA / Association Dues", lineVals.hoa, false, true)}
         {row("Other Liens / Judgments", lineVals.otherLiens, false, true)}
@@ -997,7 +1086,7 @@ function SellerNetSheet() {
 
 function CommissionStatement() {
   const { profile } = useContext(ProfileCtx);
-  const [f, setF] = useState({
+  const [f, setF] = useP("commission.f", {
     brokerage: "", address: "", listingBroker: "", buyerBroker: "",
     price: "", pct: "", buyerBrokerComm: "",
     adminFeeBuyer: "", commPaidBySeller: "", commDueBuyingBroker: "",
@@ -1160,15 +1249,15 @@ function contractSystem(docType, signers, sigInstr) {
 const STORE_OK = typeof window !== "undefined" && window.storage;
 
 function OfferBuilder() {
-  const [side, setSide] = useState("Buyer side (writing)");
-  const [d, setD] = useState({
+  const [side, setSide] = useP("offerbuild.side", "Buyer side (writing)");
+  const [d, setD] = useP("offerbuild.d", {
     buyers: "", sellers: "", address: "", mls: "", list: "", offer: "",
     earnest: "", earnestDays: "5", credit: "", buyerComp: "",
     financing: "Conventional", close: "", possession: "At closing",
     inspection: "Inspect w/ repair requests (15b)", apprAddendum: "No",
     homeSale: "No", extra: "",
   });
-  const t = useTool();
+  const t = useTool("offerbuild");
   const set = (k, v) => setD((p) => ({ ...p, [k]: v }));
 
   const run = () => {
@@ -1270,29 +1359,61 @@ function FillContract80({ deal, side }) {
       const form = pdf.getForm();
       const num = (v) => { const n = Number(String(v == null ? "" : v).replace(/[^0-9.]/g, "")); return isFinite(n) ? n : 0; };
       const money = (v) => { const n = num(v); return n ? n.toLocaleString("en-US") : ""; };
-      const setT = (name, val) => { if (val == null || String(val).trim() === "") return; try { form.getTextField(name).setText(String(val)); } catch (e) {} };
+      const filled = [];
+      const problems = [];
+      const setT = (name, val) => { if (val == null || String(val).trim() === "") return; try { form.getTextField(name).setText(String(val)); filled.push(name); } catch (e) { problems.push("field " + name); } };
+      const setBtn = (kind, name, val) => { try { if (kind === "radio") form.getRadioGroup(name).select(val); else form.getCheckBox(name).check(); filled.push(name); } catch (e) { problems.push("field " + name); } };
       // Parties + property (Para 1-2) and the address footer on every page
       setT("1", deal.buyers); setT("2", deal.sellers);
       setT("5", deal.address); setT("Address", deal.address);
       // Para 3: price, seller credit, earnest money + timing
       setT("24", money(deal.offer));
       setT("25", money(deal.credit));
-      setT("26", money(deal.earnest)); setT("27", deal.earnestDays);
+      // Earnest money: agents often type a percent ("1.5%") — the form blank is
+      // dollars, so convert % of the offer price into dollars. (A bare percent
+      // used to be written through as that many dollars — "1.5" for 1.5%.)
+      const emRaw = String(deal.earnest || "");
+      let emVal = "";
+      if (emRaw.includes("%")) {
+        const pct = num(emRaw); const px = num(deal.offer);
+        if (pct && px) emVal = Math.round(px * pct / 100).toLocaleString("en-US");
+        else problems.push("earnest money (a % needs an offer price to convert)");
+      } else emVal = money(deal.earnest);
+      setT("26", emVal); setT("27", deal.earnestDays);
       // Para 5: closing date — "October 30" + 2-digit year in the ", 20__" blank
       if (deal.close) {
         let dt = new Date(deal.close + "T12:00:00");
         if (isNaN(dt.getTime())) dt = new Date(deal.close);
         if (!isNaN(dt.getTime())) { setT("44", dt.toLocaleDateString("en-US", { month: "long", day: "numeric" })); setT("45", String(dt.getFullYear()).slice(2)); }
+        else problems.push("closing date (couldn't read \"" + deal.close + "\" — use e.g. Nov 20, 2026)");
       }
       // Para 4: seller contribution to buyer brokerage comp — % or flat $
       const bc = String(deal.buyerComp || "");
-      if (bc.includes("%")) { try { form.getRadioGroup("37").select("Percent"); } catch (e) {} setT("38", bc.replace(/[^0-9.]/g, "")); }
-      else if (num(bc)) { try { form.getRadioGroup("37").select("Amount"); } catch (e) {} setT("39", money(bc)); }
+      if (bc.includes("%")) { setBtn("radio", "37", "Percent"); setT("38", bc.replace(/[^0-9.]/g, "")); }
+      else if (num(bc)) { setBtn("radio", "37", "Amount"); setT("39", money(bc)); }
       // Para 8a: financing type (Cash leaves 8a blank — no mortgage contingency)
       const finMap = { Conventional: "Choice1", FHA: "Choice2", VA: "Choice3", USDA: "Choice4" };
-      if (finMap[deal.financing]) { try { form.getRadioGroup("112").select(finMap[deal.financing]); } catch (e) {} }
+      if (finMap[deal.financing]) setBtn("radio", "112", finMap[deal.financing]);
       // Para 37 addendum list: Appraisal Addendum
-      if (deal.apprAddendum === "Yes") { try { form.getCheckBox("289").check(); } catch (e) {} }
+      if (deal.apprAddendum === "Yes") setBtn("check", "289");
+      // Para 15 inspection election + Para 31 home-sale contingency are
+      // "initial the applicable line" paragraphs on the 8.0, so the app fills
+      // the parties' initials (derived from the names above) on the elected
+      // lines: Para 15 a) fields 154-157, b) 158-161, c) 166-169; Para 31
+      // fields 199-202. Slots run buyer 1, buyer 2, seller 1, seller 2 (the
+      // same order as the form's page footers).
+      const splitNames = (s) => String(s || "").split(/\s+and\s+|\s*&\s*|,\s*/).map((x) => x.trim()).filter(Boolean);
+      const initialsOf = (nm) => { const parts = String(nm || "").trim().split(/\s+/).filter(Boolean); if (!parts.length) return ""; return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase(); };
+      const buyerInits = splitNames(deal.buyers).map(initialsOf).filter(Boolean);
+      const sellerInits = splitNames(deal.sellers).map(initialsOf).filter(Boolean);
+      const inspMap = { "Waive (15a)": ["154", "155", "156", "157"], "Inspect w/ repair requests (15b)": ["158", "159", "160", "161"], "Inspect, no requests (15c)": ["166", "167", "168", "169"] };
+      const inspFields = inspMap[deal.inspection];
+      if (inspFields && buyerInits.length) buyerInits.slice(0, 2).forEach((ini, i) => setT(inspFields[i], ini));
+      if (deal.homeSale === "Yes") {
+        const p31 = ["199", "200", "201", "202"];
+        buyerInits.slice(0, 2).forEach((ini, i) => setT(p31[i], ini));
+        sellerInits.slice(0, 2).forEach((ini, i) => setT(p31[2 + i], ini));
+      }
       // Signature page: printed names + date of offer
       setT("317", deal.buyers); setT("346", deal.sellers);
       setT("314", new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }));
@@ -1301,14 +1422,28 @@ function FillContract80({ deal, side }) {
         if (String(side).indexOf("Buyer") === 0) { setT("322", profile.brokerage); setT("329", profile.name); }
         else { setT("351", profile.brokerage); setT("358", profile.name); }
       }
+      // Readback verification: re-open the filled PDF and confirm the key
+      // values actually landed. A field-name mismatch after a CAR form
+      // revision used to fail silently — now the fill fails loudly instead.
       const out = await pdf.save();
+      try {
+        const check = await window.PDFLib.PDFDocument.load(out);
+        const cform = check.getForm();
+        const readT = (n) => { try { return cform.getTextField(n).getText() || ""; } catch (e) { return ""; } };
+        if (deal.address && !readT("5")) problems.push("property address");
+        if (deal.offer && !readT("24")) problems.push("offer price");
+        if (emVal && readT("26") !== emVal) problems.push("earnest money");
+        if (inspFields && buyerInits.length && !readT(inspFields[0])) problems.push("inspection election (Para 15)");
+        if (deal.homeSale === "Yes" && buyerInits.length && !readT("199")) problems.push("home-sale contingency (Para 31)");
+      } catch (e) { problems.push("post-fill verification"); }
+      if (problems.length) { setMsg("The PDF was NOT downloaded — these items didn't fill correctly: " + problems.join("; ") + ". The form file may have changed; flag it before relying on this tool."); setBusy(false); return; }
       const url = URL.createObjectURL(new Blob([out], { type: "application/pdf" }));
       const a = document.createElement("a");
       a.href = url;
       a.download = "Multi-Board-8.0-" + deal.address.trim().replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "") + ".pdf";
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-      setMsg("Contract downloaded with the deal details filled in. Review every paragraph before sending — initials, escrowee, loan terms, and optional paragraphs (31/33/35) are completed in the PDF itself.");
+      setMsg("Contract downloaded — and the fill was verified field-by-field. Review every paragraph before sending: the Para 15 inspection election" + (deal.homeSale === "Yes" ? " and Para 31" : "") + " are initialed from the names above; escrowee, loan terms, Para 31's property details, and optional paragraphs (33/35) are still completed in the PDF itself.");
     } catch (e) { setMsg("Couldn't build the contract PDF — check your connection and try again."); }
     setBusy(false);
   };
@@ -1326,13 +1461,13 @@ function FillBuyerRep({ deal }) {
   const { profile } = useContext(ProfileCtx);
   const iso = (dt) => dt.toISOString().slice(0, 10);
   const [open, setOpen] = useState(false);
-  const [loc, setLoc] = useState("");
-  const [start, setStart] = useState(() => iso(new Date()));
-  const [end, setEnd] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() + 6); return iso(d); });
-  const [compType, setCompType] = useState(() => String(deal.buyerComp || "").includes("%") ? "Percent" : "Flat");
-  const [compAmt, setCompAmt] = useState(() => String(deal.buyerComp || "").replace(/[^0-9.]/g, ""));
-  const [minAmt, setMinAmt] = useState("");
-  const [retainer, setRetainer] = useState("");
+  const [loc, setLoc] = useP("br.loc", "");
+  const [start, setStart] = useP("br.start", iso(new Date()));
+  const [end, setEnd] = useP("br.end", (() => { const d = new Date(); d.setMonth(d.getMonth() + 6); return iso(d); })());
+  const [compType, setCompType] = useP("br.comptype", String(deal.buyerComp || "").includes("%") ? "Percent" : "Flat");
+  const [compAmt, setCompAmt] = useP("br.compamt", String(deal.buyerComp || "").replace(/[^0-9.]/g, ""));
+  const [minAmt, setMinAmt] = useP("br.minamt", "");
+  const [retainer, setRetainer] = useP("br.retainer", "");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const fill = async () => {
@@ -1351,6 +1486,7 @@ function FillBuyerRep({ deal }) {
       const num = (v) => { const n = Number(String(v == null ? "" : v).replace(/[^0-9.]/g, "")); return isFinite(n) ? n : 0; };
       const money = (v) => { const n = num(v); return n ? n.toLocaleString("en-US") : ""; };
       const setT = (name, val) => { if (val == null || String(val).trim() === "") return; try { form.getTextField(name).setText(String(val)); } catch (e) {} };
+      const setRetainerChoice = (val) => { try { form.getRadioGroup("RetainerChoice").select(val); } catch (e) {} };
       const prof = profile || {};
       // Parties, location, designated agent (Paras 1 + 3)
       setT("Brokerage", prof.brokerage); setT("Buyer", deal.buyers);
@@ -1369,6 +1505,9 @@ function FillBuyerRep({ deal }) {
       if (compType === "Percent" && compAmt) { try { form.getCheckBox("11A").check(); } catch (e) {} setT("Percent", String(compAmt).replace(/[^0-9.]/g, "")); setT("Dollar", money(minAmt)); }
       if (compType === "Flat" && compAmt) { try { form.getCheckBox("11B").check(); } catch (e) {} setT("Dollar_2", money(compAmt)); }
       setT("Retainer", money(retainer));
+      // The retainer amount alone is ambiguous — mark the Shall / Shall Not
+      // election to match whether a retainer was entered.
+      setRetainerChoice(num(retainer) > 0 ? "Shall" : "ShallNot");
       // Signature page: printed names, title names, brokerage block, dates
       const names = deal.buyers.split(/\s+and\s+|,\s*/).map((s) => s.trim()).filter(Boolean);
       setT("Buyers Name print", names[0]); setT("Buyers Name print_2", names[1]);
@@ -1383,7 +1522,7 @@ function FillBuyerRep({ deal }) {
       a.download = "Buyer-Rep-Agreement-" + deal.buyers.trim().replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "") + ".pdf";
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-      setMsg("Agreement downloaded. Signatures, initials, the retainer choice, and dual-agency consent are completed in the PDF itself.");
+      setMsg("Agreement downloaded — retainer marked " + (num(retainer) > 0 ? "\u201cShall\u201d" : "\u201cShall Not\u201d") + " to match the amount above. Signatures, initials, and dual-agency consent are completed in the PDF itself.");
     } catch (e) { setMsg("Couldn't build the agreement PDF — check your connection and try again."); }
     setBusy(false);
   };
@@ -1499,9 +1638,9 @@ function SendToFub({ deal, side, inline }) {
   const [open, setOpen] = useState(false);
   const [stages, setStages] = useState(null);   // null = not loaded, [] = loaded none
   const [stageId, setStageId] = useState("");
-  const [contactName, setContactName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
+  const [contactName, setContactName] = useP("fubsend.name", "");
+  const [email, setEmail] = useP("fubsend.email", "");
+  const [phone, setPhone] = useP("fubsend.phone", "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [done, setDone] = useState("");
@@ -1561,7 +1700,7 @@ function SendToFub({ deal, side, inline }) {
         <span style={{ fontFamily: SER, fontWeight: 700, fontSize: 17, color: C.ink }}>Send to Follow Up Boss</span>
         <button onClick={() => setOpen(false)} style={{ fontFamily: SAN, fontSize: 12, color: C.faint, background: "none", border: "none", cursor: "pointer" }}>close ✕</button>
       </div>
-      <p style={{ fontFamily: SAN, fontSize: 12, color: C.faint, lineHeight: 1.5, marginTop: 0, marginBottom: 14 }}>Creates a contact + deal in your FUB pipeline. The deal triggers your FUB→dotloop integration to open the loop on your template.</p>
+      <p style={{ fontFamily: SAN, fontSize: 12, color: C.faint, lineHeight: 1.5, marginTop: 0, marginBottom: 14 }}>Creates a contact + deal in {fubDestLabel()}. The deal triggers that account's FUB→dotloop integration to open the loop on its template.</p>
 
       <Field label="Contact name"><input style={inputStyle} value={contactName} onChange={(e) => setContactName(e.target.value)} placeholder="Client name" /></Field>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -1593,11 +1732,11 @@ function SendToDotloop({ deal, side, inline }) {
   const [open, setOpen] = useState(false);
   const [hook, setHook] = useState("");
   const [hookInput, setHookInput] = useState("");
-  const [loopName, setLoopName] = useState("");
-  const [txType, setTxType] = useState("Purchase");
-  const [clientName, setClientName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
+  const [loopName, setLoopName] = useP("dotloop.loop", "");
+  const [txType, setTxType] = useP("dotloop.type", "Purchase");
+  const [clientName, setClientName] = useP("dotloop.name", "");
+  const [email, setEmail] = useP("dotloop.email", "");
+  const [phone, setPhone] = useP("dotloop.phone", "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [done, setDone] = useState("");
@@ -1695,11 +1834,11 @@ function SendToDotloop({ deal, side, inline }) {
 const OFFER_SYSTEM = "You are an expert Illinois real estate transaction strategist helping an agent structure an offer on the Multi-Board Residential Real Estate Contract 8.0. You are given the deal terms and which side the agent represents. Produce ONE document with FOUR clearly headed sections, in this exact order:\n\n=== 1. DEAL SHEET (to enter into dotloop) ===\nA clean, scannable list of every term, labeled and grouped, that the agent can copy straight into the loop: parties, property + MLS#, list vs offer price, earnest money + timing, seller credit, buyer-broker compensation (Para 4), financing type, closing date, possession, inspection election (cite the 15a/b/c choice), appraisal addendum, home-sale contingency, and any other terms. For anything missing that the 8.0 requires, write [TO CONFIRM: ...]. Do not invent values.\n\n=== 2. CONTINGENCY NOTES (risk / benefit) ===\nFor each contingency actually in play (financing Para 8, inspection Para 15, appraisal, home-sale Para 31, attorney review Para 13, insurance Para 9), give one or two plain-English sentences on what it means strategically FOR THE SIDE THE AGENT REPRESENTS — the tradeoff of the choice made (e.g., waiving inspection = stronger offer, more risk). Keep it practical and balanced.\n\n=== 3. COVER NOTE (to the other agent) ===\nA short, professional, persuasive note to the OTHER side's agent presenting (buyer side) or responding to (seller side) this offer. Highlight its strengths. Warm but businesslike. No invented facts.\n\n=== 4. CLIENT EXPLANATION ===\nA clear, friendly explanation to the agent's OWN client of how the offer is structured and WHY each major choice was made, in everyday language a non-expert understands.\n\nRules: Use ONLY the facts provided. Adapt tone and strategy to the stated side. This is a working draft and educational explanation to inform the agent's judgment — it is NOT legal advice, and the agent must verify all terms on the approved form and involve a broker/attorney as appropriate. Keep the whole thing tight and usable. Separate the four sections with their === headers exactly as shown. Do not output any other === separators.";
 
 function ContractPrep() {
-  const [docType, setDocType] = useState("Addendum");
-  const [terms, setTerms] = useState("");
-  const [anchors, setAnchors] = useState("DocuSign anchor tags");
-  const [signers, setSigners] = useState("Buyer + seller");
-  const t = useTool();
+  const [docType, setDocType] = useP("contract.doctype", "Addendum");
+  const [terms, setTerms] = useP("contract.terms", "");
+  const [anchors, setAnchors] = useP("contract.anchors", "DocuSign anchor tags");
+  const [signers, setSigners] = useP("contract.signers", "Buyer + seller");
+  const t = useTool("contract");
 
   const ROSTER_LOCAL = ROSTER;
   const run = () => {
@@ -1727,12 +1866,12 @@ function QuickOffer() {
   const [buyer, setBuyer] = useState({ names: "", financing: "Conventional", earnest: "", inspect: "10", finance: "21", appraisal: "21", close: "", standing: "" });
   const [savedFlash, setSavedFlash] = useState(false);
   const [showBuyer, setShowBuyer] = useState(true);
-  const [address, setAddress] = useState("");
-  const [price, setPrice] = useState("");
-  const [extra, setExtra] = useState("");
-  const [signers, setSigners] = useState("Buyer + seller");
-  const [anchors, setAnchors] = useState("DocuSign anchor tags");
-  const t = useTool();
+  const [address, setAddress] = useP("quick.address", "");
+  const [price, setPrice] = useP("quick.price", "");
+  const [extra, setExtra] = useP("quick.extra", "");
+  const [signers, setSigners] = useP("quick.signers", "Buyer + seller");
+  const [anchors, setAnchors] = useP("quick.anchors", "DocuSign anchor tags");
+  const t = useTool("quick");
   const setB = (k, v) => setBuyer((b) => ({ ...b, [k]: v }));
 
   useEffect(() => { (async () => { if (STORE_OK) { try { const r = await window.storage.get("quick-buyer"); if (r) { setBuyer(JSON.parse(r.value)); setShowBuyer(false); } } catch {} } })(); }, []);
@@ -1822,19 +1961,20 @@ async function extractPdf(file) {
 }
 
 function OfferCompare() {
-  const [mode, setMode] = useState("paste");
-  const [offers, setOffers] = useState([{ id: 1, text: "" }, { id: 2, text: "" }]);
-  const [priorities, setPriorities] = useState("");
-  const t = useTool();
+  const [mode, setMode] = useP("compare.mode", "paste");
+  const [offers, setOffers] = useP("compare.offers", [{ id: 1, text: "" }, { id: 2, text: "" }]);
+  const [priorities, setPriorities] = useP("compare.priorities", "");
+  const t = useTool("compare");
   const setText = (id, v) => setOffers((o) => o.map((x) => (x.id === id ? { ...x, text: v } : x)));
   const addOffer = () => setOffers((o) => [...o, { id: Date.now(), text: "" }]);
   const removeOffer = (id) => setOffers((o) => (o.length > 2 ? o.filter((x) => x.id !== id) : o));
 
   // upload mode
-  const [files, setFiles] = useState([]);
+  const [files, setFiles] = useP("compare.files", []);
   const [busy, setBusy] = useState(false);
   const [uErr, setUErr] = useState("");
-  const [uOut, setUOut] = useState("");
+  const [uNote, setUNote] = useState("");
+  const [uOut, setUOut] = useP("compare.uout", "");
   const { add } = useContext(SavedCtx);
 
   const run = () => {
@@ -1851,24 +1991,30 @@ function OfferCompare() {
     setUErr("");
     for (const file of Array.from(list)) {
       if (file.type !== "application/pdf") continue;
-      try { const text = await extractPdf(file); setFiles((f) => [...f, { id: Date.now() + Math.random(), name: file.name, text, scanned: text.length < 40 }]); }
-      catch { setFiles((f) => [...f, { id: Date.now() + Math.random(), name: file.name, text: "", scanned: true }]); }
+      try { const text = await extractPdf(file); setFiles((f) => [...f, { id: Date.now() + Math.random(), name: file.name, text: text.slice(0, 20000), chars: text.length, scanned: text.length < 40 }]); }
+      catch { setFiles((f) => [...f, { id: Date.now() + Math.random(), name: file.name, text: "", chars: 0, scanned: true }]); }
     }
   };
 
   const analyze = async () => {
-    setUErr(""); setUOut("");
+    setUErr(""); setUNote(""); setUOut("");
     const usable = files.filter((f) => !f.scanned && f.text.length > 40);
     if (usable.length < 2) return setUErr("Need at least two readable PDFs. Scanned files can't be read yet.");
     setBusy(true);
     try {
-      if (usageInfo().n >= FREE_CAP) throw capError();
-      const r = await fetch(API_ANALYZE, { method: "POST", headers: { "Content-Type": "application/json", "x-app-token": TOKEN }, body: JSON.stringify({ offers: usable.map((f) => ({ name: f.name, text: f.text })), priorities, lang: appLang() }) });
+      // BYOK: with the agent's own Muse key connected, the analysis runs on
+      // their key (sent as x-anthropic-key) — no shared-cap check, no counter.
+      const own = museKey();
+      if (!own && usageInfo().n >= FREE_CAP) throw capError();
+      const aHeaders = { "Content-Type": "application/json", "x-app-token": TOKEN, "x-app-client": APP_CLIENT };
+      if (own) aHeaders["x-anthropic-key"] = own;
+      const r = await fetch(API_ANALYZE, { method: "POST", headers: aHeaders, body: JSON.stringify({ offers: usable.map((f) => ({ name: f.name, text: f.text })), priorities, lang: appLang() }) });
       const data = await r.json();
       if (r.status === 401) { TOKEN = ""; try { await window.storage.delete("closeassist-token"); } catch {} window.dispatchEvent(new Event("closeassist-logout")); throw new Error("Session expired — please log in again."); }
       if (!r.ok) throw new Error(data.error || "Request failed.");
-      bumpUsage();
+      if (!own) bumpUsage();
       setUOut(data.analysis);
+      if (data.truncated && data.truncated.length) setUNote("Note: " + data.truncated.join(", ") + " — those offers ran long, so only their opening sections were analyzed.");
     } catch (e) { setUErr(e.message); } finally { setBusy(false); }
   };
 
@@ -1910,7 +2056,7 @@ function OfferCompare() {
       <div style={{ display: "grid", gap: 8, marginBottom: 14 }}>
         {files.map((f) => (
           <div key={f.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: SAN, fontSize: 13.5, background: "#fff", border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${f.scanned ? C.amber : C.moss}`, borderRadius: 12, padding: "9px 12px" }}>
-            <span>{f.name} {f.scanned ? <span style={{ color: C.amberDeep, fontSize: 12 }}>— no text (scanned?)</span> : <span style={{ color: C.faint, fontSize: 12 }}>— {f.text.length.toLocaleString()} chars</span>}</span>
+            <span>{f.name} {f.scanned ? <span style={{ color: C.amberDeep, fontSize: 12 }}>— no text (scanned?)</span> : <span style={{ color: C.faint, fontSize: 12 }}>— {(f.chars != null ? f.chars : f.text.length).toLocaleString()} chars</span>}</span>
             <button onClick={() => setFiles((x) => x.filter((y) => y.id !== f.id))} style={miniBtn(C.faint)}>remove</button>
           </div>
         ))}
@@ -1918,6 +2064,7 @@ function OfferCompare() {
       <Field label="What does your client care about most? (optional)"><input style={inputStyle} value={priorities} onChange={(e) => setPriorities(e.target.value)} placeholder="Max net proceeds · fastest, cleanest close" /></Field>
       <RunButton onClick={analyze} loading={busy}>Analyze offers →</RunButton>
       {uErr && <p style={{ fontFamily: SAN, fontSize: 14, color: C.amberDeep, marginTop: 12 }}>{uErr}</p>}
+      {uNote && <p style={{ fontFamily: SAN, fontSize: 13, color: C.faint, marginTop: 12 }}>{uNote}</p>}
       {uOut && (
         <div style={{ marginTop: 20, background: C.paper, border: `1.5px solid ${C.line}`, borderLeft: `4px solid ${C.amber}`, borderRadius: 12, padding: "16px 18px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
@@ -1935,10 +2082,10 @@ function OfferCompare() {
 }
 
 function SignatureRequest() {
-  const [platform, setPlatform] = useState("DocuSign");
-  const [channel, setChannel] = useState("Email");
-  const [ctx, setCtx] = useState("");
-  const t = useTool();
+  const [platform, setPlatform] = useP("sign.platform", "DocuSign");
+  const [channel, setChannel] = useP("sign.channel", "Email");
+  const [ctx, setCtx] = useP("sign.ctx", "");
+  const t = useTool("sign");
   const run = () => {
     t.generate("You are a real estate transaction coordinator. Write a clear, warm message telling the client an e-signature envelope is on its way via " + platform + " and exactly what to do (open the email/link, review, sign all marked fields, done). Reassure them it's secure and offer to answer questions. Channel: " + channel + ". Note any deadline if given. Return 3 distinct versions separated by a line containing only ===.", "E-sign platform: " + platform + "\nChannel: " + channel + "\nContext (what they're signing, deadline): " + (ctx || "(a purchase document)"));
   };
@@ -2076,7 +2223,7 @@ function SavedDrawer({ open, onClose }) {
           <div style={{ flex: 1 }} />
           <button onClick={copyAll} disabled={!saved.length} style={{ fontFamily: SAN, fontSize: 12.5, fontWeight: 700, color: saved.length ? C.cream : C.faint, background: saved.length ? C.amber : "transparent", border: `1.5px solid ${saved.length ? C.amber : C.line}`, borderRadius: 999, padding: "5px 13px", cursor: saved.length ? "pointer" : "default" }}>{copiedAll ? "copied all ✓" : "copy all"}</button>
         </div>
-        {!saved.length && <p style={{ fontFamily: SAN, fontSize: 14, color: C.faint }}>Nothing saved yet. Hit “save ☆” on any result and it'll collect here for this session.</p>}
+        {!saved.length && <p style={{ fontFamily: SAN, fontSize: 14, color: C.faint }}>Nothing saved yet. Hit “save ☆” on any result and it'll collect here — saved items live on this device.</p>}
         {view === "list" && <div style={{ display: "grid", gap: 12 }}>{saved.map((s) => (
           <div key={s.id} style={savedCard}><div style={savedHead}><span style={{ fontFamily: SER, fontStyle: "italic", fontSize: 13, color: C.faint }}>{s.noun}</span><div style={{ display: "flex", gap: 12 }}><CopyBtn text={s.text} /><button onClick={() => remove(s.id)} style={miniBtn(C.amberDeep)}>remove</button></div></div><p style={savedText}>{s.text}</p></div>
         ))}</div>}
@@ -2152,7 +2299,7 @@ function ProfileDrawer({ open, onClose }) {
         {F("brokerage", "Brokerage", "e.g. Keystone Realty")}
         {F("phone", "Contact (phone / link)", "e.g. 555-0142 or jordan@…")}
         {F("area", "Primary area / market", "e.g. East Nashville")}
-        <p style={{ fontFamily: SAN, fontSize: 11.5, color: C.faint, lineHeight: 1.5 }}>Saved for this session only. Always confirm your brokerage's branding & disclosure requirements before publishing.</p>
+        <p style={{ fontFamily: SAN, fontSize: 11.5, color: C.faint, lineHeight: 1.5 }}>Stored on this device — it stays until you clear this browser's site data. Always confirm your brokerage's branding & disclosure requirements before publishing.</p>
       </div>
     </div>
   );
@@ -2259,7 +2406,12 @@ function MuseDrawer({ open, onClose, onKeyChange }) {
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [use, setUse] = useState({ n: 0, resetLabel: "" });
-  useEffect(() => { if (open) { const k = museKey(); setHasKey(!!k); setTail(k ? k.slice(-4) : ""); setKey(""); setMsg(""); setErr(""); setUse(usageInfo()); } }, [open ]);
+  const [fubInput, setFubInput] = useState("");
+  const [hasFub, setHasFub] = useState(false);
+  const [fubTail, setFubTail] = useState("");
+  const [fubMsg, setFubMsg] = useState("");
+  const [fubErr, setFubErr] = useState("");
+  useEffect(() => { if (open) { const k = museKey(); setHasKey(!!k); setTail(k ? k.slice(-4) : ""); setKey(""); setMsg(""); setErr(""); setUse(usageInfo()); const fk = fubKey(); setHasFub(!!fk); setFubTail(fk ? fk.slice(-4) : ""); setFubInput(""); setFubMsg(""); setFubErr(""); } }, [open ]);
   if (!open) return null;
   const connect = () => {
     const v = key.trim();
@@ -2269,6 +2421,14 @@ function MuseDrawer({ open, onClose, onKeyChange }) {
     setMsg("Connected — your drafts now run on your key."); onKeyChange(true);
   };
   const disconnect = () => { setMuseKey(""); setHasKey(false); setTail(""); setErr(""); setMsg("Disconnected — back to the shared backend."); onKeyChange(false); };
+  const connectFub = () => {
+    const v = fubInput.trim();
+    if (!v) { setFubErr("Paste your Follow Up Boss API key first."); return; }
+    if (v.length < 10) { setFubErr("That doesn't look like a complete FUB key."); return; }
+    setFubKey(v); setHasFub(true); setFubTail(v.slice(-4)); setFubInput(""); setFubErr("");
+    setFubMsg("Connected — FUB buttons now write to your account.");
+  };
+  const disconnectFub = () => { setFubKey(""); setHasFub(false); setFubTail(""); setFubErr(""); setFubMsg("Disconnected — FUB buttons go back to the CloseAssist account."); };
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", justifyContent: "flex-end" }}>
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(28,24,21,.4)" }} />
@@ -2305,6 +2465,25 @@ function MuseDrawer({ open, onClose, onKeyChange }) {
           </div>
         )}
         {msg && <p style={{ fontFamily: SAN, fontSize: 13, color: C.moss, fontWeight: 600 }}>{msg}</p>}
+        <div style={{ marginTop: 20, borderTop: "1.5px solid " + C.line, paddingTop: 18 }}>
+          <span style={{ fontFamily: SER, fontWeight: 700, fontSize: 19, color: C.ink }}>Follow Up Boss</span>
+          <p style={{ fontFamily: SAN, fontSize: 13, color: C.faint, lineHeight: 1.6, marginTop: 6 }}>The FUB buttons (log a draft, send a deal, deadline tasks) write into a Follow Up Boss account. Connect your own FUB API key and they write into <b>yours</b>. Without it, they go to the CloseAssist account — fine for a look around, not for real clients.</p>
+          {hasFub ? (
+            <div>
+              <p style={{ fontFamily: SAN, fontSize: 14, color: C.moss, fontWeight: 700 }}>✓ Your FUB connected <span style={{ fontWeight: 400, color: C.faint }}>(key ending …{fubTail})</span></p>
+              <button onClick={disconnectFub} style={{ fontFamily: SAN, fontSize: 13, fontWeight: 700, color: C.amberDeep, background: "transparent", border: "1.5px solid " + C.amberDeep, borderRadius: 999, padding: "8px 16px", cursor: "pointer" }}>Disconnect my FUB key</button>
+            </div>
+          ) : (
+            <div>
+              <label style={{ display: "block", fontFamily: SAN, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1.2, color: C.faint, marginBottom: 6 }}>Follow Up Boss API key</label>
+              <input type="password" value={fubInput} onChange={(e) => setFubInput(e.target.value)} placeholder="Your FUB API key" style={inputStyle} />
+              {fubErr && <p style={{ fontFamily: SAN, fontSize: 13, color: C.amberDeep }}>{fubErr}</p>}
+              <button onClick={connectFub} style={{ width: "100%", marginTop: 12, fontFamily: SAN, fontSize: 14, fontWeight: 700, color: "#fff", background: C.moss, border: "none", borderRadius: 12, padding: "12px", cursor: "pointer" }}>Connect my FUB</button>
+              <p style={{ fontFamily: SAN, fontSize: 12, color: C.faint, lineHeight: 1.55 }}>Find it in FUB under Admin → API. Stored only on this device, and sent only with your FUB actions.</p>
+            </div>
+          )}
+          {fubMsg && <p style={{ fontFamily: SAN, fontSize: 13, color: C.moss, fontWeight: 600 }}>{fubMsg}</p>}
+        </div>
       </div>
     </div>
   );
@@ -2331,8 +2510,8 @@ function BottomNav({ view, goHome, setDrawer, savedCount, museOn, hasBrand }) {
 
 function App() {
   const [tab, setTab] = useState("follow");
-  const [saved, setSaved] = useState([]);
-  const [profile, setProfile] = useState({});
+  const [saved, setSaved] = useP("app.saved", []);
+  const [profile, setProfile] = useP("app.profile", {});
   const [drawer, setDrawer] = useState(null); // 'saved' | 'brand' | 'muse' | null
   const [view, setView] = useState({ name: "home" });
   const [museOn, setMuseOn] = useState(() => { try { return !!(window.localStorage && window.localStorage.getItem("ca-claude-key")); } catch (e) { return false; } });
@@ -2425,7 +2604,7 @@ function App() {
               <Active />
             </div>
             </AccentCtx.Provider>
-            <p style={{ maxWidth: 820, margin: "18px auto 0", padding: "0 28px", fontFamily: SAN, fontSize: 11.5, color: C.faint, lineHeight: 1.5 }}>Drafts are AI-generated — read before you send, and follow your local real estate advertising, fair-housing & consent (e.g. TCPA) rules. Brand details and saved items last for this session only.</p>
+            <p style={{ maxWidth: 820, margin: "18px auto 0", padding: "0 28px", fontFamily: SAN, fontSize: 11.5, color: C.faint, lineHeight: 1.5 }}>Drafts are AI-generated — read before you send, and follow your local real estate advertising, fair-housing & consent (e.g. TCPA) rules. Brand details and saved items live on this device (clearing browser data removes them).</p>
           </>)}
           <p style={{ maxWidth: 820, margin: "30px auto 0", padding: "0 28px 8px", textAlign: "center", fontFamily: SAN, fontSize: 12, color: C.faint }}>✨ Powered by <b style={{ color: C.ink }}>Muse</b> · <button onClick={() => setDrawer("muse")} style={{ fontFamily: SAN, fontSize: 12, fontWeight: 600, color: C.amber, background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>connect your own key →</button></p>
         </div>

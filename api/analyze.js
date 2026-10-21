@@ -3,7 +3,6 @@
 // asks Claude to compare and rank the offers, returns the analysis.
 
 import Anthropic from "@anthropic-ai/sdk";
-import { verify } from "../lib/auth.js";
 
 export const config = { maxDuration: 60 };
 
@@ -30,19 +29,55 @@ Then:
 
 Weigh the client's stated priorities if provided. Be well-organized with short headers. This analysis informs the agent's judgment — it is NOT legal or financial advice, and the agent must verify every term against the actual signed documents.`;
 
+
+// ── abuse floor (open tester rollout — no user-facing auth by design) ──
+// Best-effort floors, NOT real authentication: a non-secret client header
+// the app sends (stops casual curl/scanner use; anyone reading the page
+// source can copy it), per-IP in-memory rate limiting (per warm function
+// instance), input length caps, a server-side max_tokens clamp, and CORS
+// restricted to the app's own origin unless ALLOWED_ORIGIN is set.
+const APP_CLIENT = "closeassist-web";
+const RL = new Map();
+function rateLimited(req, max, windowMs) {
+  const now = Date.now();
+  if (RL.size > 5000) RL.clear();
+  const ip = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() || (req.socket && req.socket.remoteAddress) || "unknown";
+  const hits = (RL.get(ip) || []).filter((t) => now - t < windowMs);
+  hits.push(now);
+  RL.set(ip, hits);
+  return hits.length > max;
+}
+function corsOrigin(req) {
+  if (process.env.ALLOWED_ORIGIN) return process.env.ALLOWED_ORIGIN;
+  const o = req.headers.origin;
+  if (!o) return "*";
+  try { return new URL(o).host === req.headers.host ? o : "https://" + req.headers.host; } catch (e) { return "*"; }
+}
+
 export default async function handler(req, res) {
-  const origin = process.env.ALLOWED_ORIGIN || "*";
-  res.setHeader("Access-Control-Allow-Origin", origin);
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-app-key, x-app-token");
+  res.setHeader("Access-Control-Allow-Origin", corsOrigin(req));
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-app-key, x-app-token, x-app-client, x-anthropic-key");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Vary", "Origin");
 
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Use POST." });
 
-  // NOTE: auth removed for the open tester rollout (2026-10-19).
-  // Anyone with the URL can use this endpoint on the owner's key.
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (req.headers["x-app-client"] !== APP_CLIENT) {
+    return res.status(403).json({ error: "This endpoint only accepts requests from the CloseAssist app. If you're in the app, hard-refresh — your copy may be out of date." });
+  }
+  if (rateLimited(req, 20, 10 * 60 * 1000)) {
+    return res.status(429).json({ error: "Lots of requests from your connection just now — wait a minute and try again." });
+  }
+
+  // Caller key (BYOK): Offer Compare's upload mode runs on the agent's own
+  // Anthropic key when they connected one — sent per-request, never stored.
+  const callerKey = req.headers["x-anthropic-key"];
+  if (callerKey !== undefined && !(typeof callerKey === "string" && callerKey.indexOf("sk-ant-") === 0)) {
+    return res.status(400).json({ error: "That Anthropic key doesn't look right — reconnect it in the Muse drawer." });
+  }
+  const apiKey = callerKey || process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
     return res.status(500).json({ error: "Server missing ANTHROPIC_API_KEY." });
   }
 
@@ -52,6 +87,9 @@ export default async function handler(req, res) {
     const langInstruct = lang === "es" ? "\n\nWrite your entire response in Spanish (neutral Latin American Spanish, warm and professional, appropriate for US Hispanic real estate clients). Keep proper names, addresses, and numbers as-is." : "";
 
     if (!Array.isArray(offers)) return res.status(400).json({ error: "Send an 'offers' array." });
+    if (offers.some((o) => String((o && o.text) || "").length > 400000)) {
+      return res.status(400).json({ error: "One of those files is too large to analyze (over ~400,000 characters of extracted text)." });
+    }
 
     const usable = offers
       .map((o, i) => ({
@@ -68,14 +106,18 @@ export default async function handler(req, res) {
     }
     if (usable.length > 12) return res.status(400).json({ error: "Max 12 offers per batch." });
 
+    // Offers are sliced to 16k chars for the model — say which ones, so the
+    // agent knows the comparison didn't see the whole document.
+    const truncated = usable.filter((o) => o.text.length > 16000).map((o) => o.name);
+
     const body =
       (priorities ? `What the client cares about most: ${priorities}\n\n` : "") +
       usable.map((o) => `OFFER ${o.label} (${o.name}):\n${o.text.slice(0, 16000)}`).join("\n\n----\n\n");
 
-    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const anthropic = new Anthropic({ apiKey });
     const msg = await anthropic.messages.create({
       model: MODEL,
-      max_tokens: 2200,
+      max_tokens: 3000,
       system: SYSTEM + langInstruct,
       messages: [{ role: "user", content: body }],
     });
@@ -89,6 +131,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       analysis,
       read: usable.map((o) => ({ label: o.label, name: o.name })),
+      truncated,
       model: MODEL,
     });
   } catch (err) {

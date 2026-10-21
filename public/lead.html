@@ -77,7 +77,7 @@
 
     fetch("/api/fub", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-app-client": "closeassist-web" },
       body: JSON.stringify({
         action: "lead",
         type: q.get("type") || "Seller Inquiry",

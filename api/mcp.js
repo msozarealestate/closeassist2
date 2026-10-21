@@ -27,7 +27,7 @@ async function draft(key, system, user) {
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 1600,
+      max_tokens: 3200,
       system: system || undefined,
       messages: [{ role: "user", content: user }],
     }),
@@ -52,12 +52,17 @@ function netSheet(a) {
   if (!price) throw new Error("sale_price is required.");
   const stateStamp = a.transfer_state != null ? num(a.transfer_state) : Math.ceil(price / 500) * 0.5;
   const countyStamp = a.transfer_county != null ? num(a.transfer_county) : Math.ceil(price / 500) * 0.25;
-  const cityStamp = num(a.transfer_city);
+  // Chicago: the seller customarily pays the CTA share of the city transfer
+  // tax ($1.50 per $500) — default it when the property is in Chicago and the
+  // caller didn't override transfer_city.
+  const cityStamp = a.transfer_city != null ? num(a.transfer_city)
+    : (/chicago/i.test(String(a.city || "")) ? Math.ceil(price / 500) * 1.5 : 0);
   const commission = a.commission_flat != null && String(a.commission_flat).trim() !== ""
     ? num(a.commission_flat)
     : price * num(a.commission_pct === undefined ? 6 : a.commission_pct) / 100;
+  // Cook County convention: prorate at 105% of the last full tax bill.
   const taxProration = (a.annual_tax != null && a.tax_proration_months != null)
-    ? num(a.annual_tax) / 12 * num(a.tax_proration_months) : 0;
+    ? num(a.annual_tax) / 12 * num(a.tax_proration_months) * (/cook/i.test(String(a.county || "")) ? 1.05 : 1) : 0;
   const lines = [
     ["Commission", commission],
     ["Attorney fee", num(a.attorney_fee === undefined ? 750 : a.attorney_fee)],
@@ -92,14 +97,36 @@ function addCalDays(base, days) {
   d.setDate(d.getDate() + days);
   return d;
 }
+// Business days skip weekends AND US federal holidays (fixed dates +
+// nth-weekday rules; observed-day shifts are not applied).
+function ymdStr(d) {
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+const HOLI_CACHE = {};
+function holidaysFor(year) {
+  if (HOLI_CACHE[year]) return HOLI_CACHE[year];
+  const S = new Set();
+  const put = (dt) => S.add(ymdStr(dt));
+  put(new Date(year, 0, 1)); put(new Date(year, 5, 19)); put(new Date(year, 6, 4));
+  put(new Date(year, 10, 11)); put(new Date(year, 11, 25));
+  const nth = (m, wd, n) => { const f = new Date(year, m, 1); return new Date(year, m, 1 + ((wd - f.getDay() + 7) % 7) + (n - 1) * 7); };
+  const last = (m, wd) => { const e = new Date(year, m + 1, 0); return new Date(year, m, e.getDate() - ((e.getDay() - wd + 7) % 7)); };
+  put(nth(0, 1, 3)); put(nth(1, 1, 3)); put(last(4, 1));
+  put(nth(8, 1, 1)); put(nth(9, 1, 2)); put(nth(10, 4, 4));
+  HOLI_CACHE[year] = S;
+  return S;
+}
+function isBizDay(d) {
+  const dow = d.getDay();
+  return dow !== 0 && dow !== 6 && !holidaysFor(d.getFullYear()).has(ymdStr(d));
+}
 function addBizDays(base, days) {
   const d = new Date(base + "T00:00:00");
-  let added = 0;
-  const step = days >= 0 ? 1 : -1;
-  while (Math.abs(added) < Math.abs(days)) {
+  const step = days < 0 ? -1 : 1;
+  let remaining = Math.abs(days);
+  while (remaining > 0) {
     d.setDate(d.getDate() + step);
-    const dow = d.getDay();
-    if (dow !== 0 && dow !== 6) added += step;
+    if (isBizDay(d)) remaining--;
   }
   return d;
 }
@@ -110,15 +137,23 @@ function fmt(d) {
 function deadlines(a) {
   const accept = a.acceptance_date;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(accept || "")) throw new Error("acceptance_date is required (YYYY-MM-DD).");
-  const list = [
+  const list = [];
+  const emDays = a.earnest_money_days != null ? Number(a.earnest_money_days) : 5;
+  if (isFinite(emDays) && emDays > 0) list.push(["Earnest money due", addBizDays(accept, emDays), "Para 3 — " + emDays + " business days after acceptance"]);
+  list.push(
     ["Attorney Review ends", addBizDays(accept, 5), "Multi-Board 8.0 Para 13 — 5 business days"],
     ["Inspection notice due", addBizDays(accept, 5), "Para 15 — typically 5 business days"],
-    ["Homeowner insurance contingency", addBizDays(accept, 10), "Para 9 — 10 business days"],
-    ["Financing approval (contingency date)", addCalDays(accept, 45), "Para 8 — 45 calendar days"],
-  ];
+    ["Homeowner insurance contingency", addBizDays(accept, 10), "Para 9 — 10 business days"]
+  );
+  // Para 8: 45 calendar days, or 5 business days before closing — whichever is EARLIER.
+  let finDate = addCalDays(accept, 45);
+  let finNote = "Para 8 — 45 calendar days";
   if (a.closing_date && /^\d{4}-\d{2}-\d{2}$/.test(a.closing_date)) {
+    const fiveBefore = addBizDays(a.closing_date, -5);
+    if (fiveBefore < finDate) { finDate = fiveBefore; finNote = "Para 8 — 5 business days before closing (earlier than the 45-day date)"; }
     list.push(["Closing", new Date(a.closing_date + "T00:00:00"), "Para 5"]);
   }
+  list.push(["Financing approval (contingency date)", finDate, finNote]);
   list.sort((x, y) => x[1] - y[1]);
   let out = "TRANSACTION DEADLINES" + (a.property_address ? " — " + a.property_address : "") + "\n";
   out += "Date of Acceptance: " + fmt(new Date(accept + "T00:00:00")) + "\n\n";
@@ -210,12 +245,14 @@ const TOOLS = [
   },
   {
     name: "seller_net_sheet",
-    description: "Estimate an Illinois seller's closing costs and net proceeds. Uses IL transfer-tax formulas (state $0.50/$500, county $0.25/$500) with editable overrides. Pure math — no AI key needed.",
+    description: "Estimate an Illinois seller's closing costs and net proceeds. Uses IL transfer-tax formulas (state $0.50/$500, county $0.25/$500) with editable overrides; pass city/county for the Chicago CTA-share default and the Cook County 105% proration. Pure math — no AI key needed.",
     needsKey: false,
     inputSchema: {
       type: "object",
       properties: {
         sale_price: { type: "number", description: "Expected sale price" },
+        city: { type: "string", description: "Property city (Chicago triggers the seller CTA transfer-tax default of $1.50/$500)" },
+        county: { type: "string", description: "Property county (Cook triggers the 105% tax-proration convention)" },
         loan_payoff: { type: "number", description: "Mortgage payoff amount", default: 0 },
         commission_pct: { type: "number", description: "Commission percent (ignored if commission_flat set)", default: 6 },
         commission_flat: { type: "number", description: "Flat commission amount (overrides pct)" },
@@ -240,12 +277,13 @@ const TOOLS = [
   },
   {
     name: "contract_deadlines",
-    description: "Map the key Illinois Multi-Board 8.0 contract deadlines from the date of acceptance (attorney review, inspection, insurance, financing). Pure math — no AI key needed.",
+    description: "Map the key Illinois Multi-Board 8.0 contract deadlines from the date of acceptance (earnest money, attorney review, inspection, insurance, financing). Business days skip weekends and US federal holidays. Pure math — no AI key needed.",
     needsKey: false,
     inputSchema: {
       type: "object",
       properties: {
         acceptance_date: { type: "string", description: "Date of acceptance, YYYY-MM-DD" },
+        earnest_money_days: { type: "number", description: "Business days after acceptance for earnest money (default 5; 0 to omit)", default: 5 },
         closing_date: { type: "string", description: "Closing date, YYYY-MM-DD (optional)" },
         property_address: { type: "string", description: "Property address (optional)" },
       },
