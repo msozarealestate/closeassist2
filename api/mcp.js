@@ -9,6 +9,12 @@
 
 export const config = { maxDuration: 60 };
 
+// Calculator math (deadlines, net sheet) lives in ONE canonical module —
+// shared/calcs.js, emitted here as ./_calcs.js by build/build.js — which
+// the app also inlines. Never re-copy the math into this file; the
+// app↔MCP parity test (testenv/round3_parity.mjs) fails if they drift.
+import { CACalcs } from "./_calcs.js";
+
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-sonnet-4-6";
 const ES_INSTRUCT = "\n\nWrite your entire response in Spanish (neutral Latin American Spanish, warm and professional, appropriate for US Hispanic real estate clients). Keep proper names, addresses, and numbers as-is.";
@@ -37,7 +43,7 @@ async function draft(key, system, user) {
   return (data.content || []).map((b) => (b.type === "text" ? b.text : "")).filter(Boolean).join("\n").trim();
 }
 
-// ---------- calculators (ported from the app) ----------
+// ---------- calculators (shared module — see ./_calcs.js) ----------
 
 function num(v) {
   const n = Number(String(v == null ? "" : v).replace(/[^0-9.]/g, ""));
@@ -50,19 +56,10 @@ function money(n) {
 function netSheet(a) {
   const price = num(a.sale_price);
   if (!price) throw new Error("sale_price is required.");
-  const stateStamp = a.transfer_state != null ? num(a.transfer_state) : Math.ceil(price / 500) * 0.5;
-  const countyStamp = a.transfer_county != null ? num(a.transfer_county) : Math.ceil(price / 500) * 0.25;
-  // Chicago: the seller customarily pays the CTA share of the city transfer
-  // tax ($1.50 per $500) — default it when the property is in Chicago and the
-  // caller didn't override transfer_city.
-  const cityStamp = a.transfer_city != null ? num(a.transfer_city)
-    : (/chicago/i.test(String(a.city || "")) ? Math.ceil(price / 500) * 1.5 : 0);
-  const commission = a.commission_flat != null && String(a.commission_flat).trim() !== ""
-    ? num(a.commission_flat)
-    : price * num(a.commission_pct === undefined ? 6 : a.commission_pct) / 100;
-  // Cook County convention: prorate at 105% of the last full tax bill.
-  const taxProration = (a.annual_tax != null && a.tax_proration_months != null)
-    ? num(a.annual_tax) / 12 * num(a.tax_proration_months) * (/cook/i.test(String(a.county || "")) ? 1.05 : 1) : 0;
+  const stamps = CACalcs.transferStamps(price, a.city, a.transfer_state, a.transfer_county, a.transfer_city);
+  const stateStamp = stamps.state, countyStamp = stamps.county, cityStamp = stamps.city;
+  const commission = CACalcs.commission(price, a.commission_pct === undefined ? 6 : a.commission_pct, a.commission_flat);
+  const taxProration = CACalcs.taxProration(a.annual_tax, a.tax_proration_months, a.county).amount;
   const lines = [
     ["Commission", commission],
     ["Attorney fee", num(a.attorney_fee === undefined ? 750 : a.attorney_fee)],
@@ -92,72 +89,17 @@ function netSheet(a) {
   return out;
 }
 
-function addCalDays(base, days) {
-  const d = new Date(base + "T00:00:00");
-  d.setDate(d.getDate() + days);
-  return d;
-}
-// Business days skip weekends AND US federal holidays (fixed dates +
-// nth-weekday rules; observed-day shifts are not applied).
-function ymdStr(d) {
-  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
-}
-const HOLI_CACHE = {};
-function holidaysFor(year) {
-  if (HOLI_CACHE[year]) return HOLI_CACHE[year];
-  const S = new Set();
-  const put = (dt) => S.add(ymdStr(dt));
-  put(new Date(year, 0, 1)); put(new Date(year, 5, 19)); put(new Date(year, 6, 4));
-  put(new Date(year, 10, 11)); put(new Date(year, 11, 25));
-  const nth = (m, wd, n) => { const f = new Date(year, m, 1); return new Date(year, m, 1 + ((wd - f.getDay() + 7) % 7) + (n - 1) * 7); };
-  const last = (m, wd) => { const e = new Date(year, m + 1, 0); return new Date(year, m, e.getDate() - ((e.getDay() - wd + 7) % 7)); };
-  put(nth(0, 1, 3)); put(nth(1, 1, 3)); put(last(4, 1));
-  put(nth(8, 1, 1)); put(nth(9, 1, 2)); put(nth(10, 4, 4));
-  HOLI_CACHE[year] = S;
-  return S;
-}
-function isBizDay(d) {
-  const dow = d.getDay();
-  return dow !== 0 && dow !== 6 && !holidaysFor(d.getFullYear()).has(ymdStr(d));
-}
-function addBizDays(base, days) {
-  const d = new Date(base + "T00:00:00");
-  const step = days < 0 ? -1 : 1;
-  let remaining = Math.abs(days);
-  while (remaining > 0) {
-    d.setDate(d.getDate() + step);
-    if (isBizDay(d)) remaining--;
-  }
-  return d;
-}
-function fmt(d) {
-  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
-}
-
+// Deadline math is the shared module's (CACalcs.computeDeadlines) — this
+// wrapper only validates input and formats the shared result as text.
 function deadlines(a) {
   const accept = a.acceptance_date;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(accept || "")) throw new Error("acceptance_date is required (YYYY-MM-DD).");
-  const list = [];
-  const emDays = a.earnest_money_days != null ? Number(a.earnest_money_days) : 5;
-  if (isFinite(emDays) && emDays > 0) list.push(["Earnest money due", addBizDays(accept, emDays), "Para 3 — " + emDays + " business days after acceptance"]);
-  list.push(
-    ["Attorney Review ends", addBizDays(accept, 5), "Multi-Board 8.0 Para 13 — 5 business days"],
-    ["Inspection notice due", addBizDays(accept, 5), "Para 15 — typically 5 business days"],
-    ["Homeowner insurance contingency", addBizDays(accept, 10), "Para 9 — 10 business days"]
-  );
-  // Para 8: 45 calendar days, or 5 business days before closing — whichever is EARLIER.
-  let finDate = addCalDays(accept, 45);
-  let finNote = "Para 8 — 45 calendar days";
-  if (a.closing_date && /^\d{4}-\d{2}-\d{2}$/.test(a.closing_date)) {
-    const fiveBefore = addBizDays(a.closing_date, -5);
-    if (fiveBefore < finDate) { finDate = fiveBefore; finNote = "Para 8 — 5 business days before closing (earlier than the 45-day date)"; }
-    list.push(["Closing", new Date(a.closing_date + "T00:00:00"), "Para 5"]);
-  }
-  list.push(["Financing approval (contingency date)", finDate, finNote]);
-  list.sort((x, y) => x[1] - y[1]);
+  const closing = a.closing_date && /^\d{4}-\d{2}-\d{2}$/.test(a.closing_date) ? a.closing_date : "";
+  const emDays = a.earnest_money_days != null ? a.earnest_money_days : 5;
+  const list = CACalcs.computeDeadlines({ accept, closing, emDays });
   let out = "TRANSACTION DEADLINES" + (a.property_address ? " — " + a.property_address : "") + "\n";
-  out += "Date of Acceptance: " + fmt(new Date(accept + "T00:00:00")) + "\n\n";
-  for (const [label, date, note] of list) out += fmt(date) + " — " + label + " (" + note + ")\n";
+  out += "Date of Acceptance: " + CACalcs.fmtDay(new Date(accept + "T00:00:00")) + "\n\n";
+  for (const m of list) out += CACalcs.fmtDay(new Date(m.date + "T00:00:00")) + " — " + m.label + " (" + m.note + ")\n";
   out += "\nEstimate from standard Multi-Board 8.0 timelines — verify against the executed contract and any riders.";
   return out;
 }
@@ -277,7 +219,7 @@ const TOOLS = [
   },
   {
     name: "contract_deadlines",
-    description: "Map the key Illinois Multi-Board 8.0 contract deadlines from the date of acceptance (earnest money, attorney review, inspection, insurance, financing). Business days skip weekends and US federal holidays. Pure math — no AI key needed.",
+    description: "Map the key Illinois Multi-Board 8.0 contract deadlines from the date of acceptance (earnest money, attorney review, inspection, insurance, financing). Business days skip weekends and US federal holidays, including observed days. Pure math — no AI key needed.",
     needsKey: false,
     inputSchema: {
       type: "object",

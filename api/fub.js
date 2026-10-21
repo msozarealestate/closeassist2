@@ -68,10 +68,18 @@ async function findOrCreatePerson({ name, email, phone, source, tags }, keyOverr
 // ── abuse floor (open tester rollout — no user-facing auth by design) ──
 // Best-effort floors, NOT real authentication: a non-secret client header
 // the app sends (stops casual curl/scanner use; anyone reading the page
-// source can copy it), per-IP in-memory rate limiting (per warm function
-// instance), input length caps, a server-side max_tokens clamp, and CORS
-// restricted to the app's own origin unless ALLOWED_ORIGIN is set.
+// source can copy it), rate limiting, and CORS restricted to the app's
+// own origin unless ALLOWED_ORIGIN is set.
+//
+// Rate-limit shape (round 3): per-IP limits are deliberately DEMO-SAFE —
+// an office or pitch room behind one NAT shares a single bucket, so the
+// ceiling is sized for a roomful of agents. A per-instance GLOBAL
+// ceiling (hourly + daily) backs it up as a write-spam backstop for the
+// CRM accounts this endpoint can write to. Honest limits: counters are
+// in-memory per warm instance, so ceilings are per-instance, not
+// fleet-wide. Mitigation, not authentication.
 const APP_CLIENT = "closeassist-web";
+const BUSY = "CloseAssist is getting a lot of use right this minute — wait a minute and try again.";
 const RL = new Map();
 function rateLimited(req, max, windowMs) {
   const now = Date.now();
@@ -81,6 +89,15 @@ function rateLimited(req, max, windowMs) {
   hits.push(now);
   RL.set(ip, hits);
   return hits.length > max;
+}
+const GLOBAL = { hour: [], day: [] };
+function globalCeiling(hourMax, dayMax) {
+  const now = Date.now();
+  GLOBAL.hour = GLOBAL.hour.filter((t) => now - t < 3600e3);
+  GLOBAL.day = GLOBAL.day.filter((t) => now - t < 86400e3);
+  if (GLOBAL.hour.length >= hourMax || GLOBAL.day.length >= dayMax) return true;
+  GLOBAL.hour.push(now); GLOBAL.day.push(now);
+  return false;
 }
 function corsOrigin(req) {
   if (process.env.ALLOWED_ORIGIN) return process.env.ALLOWED_ORIGIN;
@@ -100,8 +117,11 @@ export default async function handler(req, res) {
   if (req.headers["x-app-client"] !== APP_CLIENT) {
     return res.status(403).json({ error: "This endpoint only accepts requests from the CloseAssist app. If you're in the app, hard-refresh — your copy may be out of date." });
   }
-  if (rateLimited(req, 60, 10 * 60 * 1000)) {
-    return res.status(429).json({ error: "Lots of requests from your connection just now — wait a minute and try again." });
+  if (rateLimited(req, 300, 10 * 60 * 1000)) {
+    return res.status(429).json({ error: BUSY });
+  }
+  if (globalCeiling(1000, 6000)) {
+    return res.status(429).json({ error: BUSY });
   }
 
   let body;

@@ -33,10 +33,20 @@ Weigh the client's stated priorities if provided. Be well-organized with short h
 // ── abuse floor (open tester rollout — no user-facing auth by design) ──
 // Best-effort floors, NOT real authentication: a non-secret client header
 // the app sends (stops casual curl/scanner use; anyone reading the page
-// source can copy it), per-IP in-memory rate limiting (per warm function
-// instance), input length caps, a server-side max_tokens clamp, and CORS
-// restricted to the app's own origin unless ALLOWED_ORIGIN is set.
+// source can copy it), rate limiting, input length caps, a server-side
+// max_tokens clamp, and CORS restricted to the app's own origin unless
+// ALLOWED_ORIGIN is set.
+//
+// Rate-limit shape (round 3): per-IP limits are deliberately DEMO-SAFE —
+// a brokerage office or pitch room behind one NAT shares a single
+// bucket, so the per-IP ceiling is sized for a roomful of agents, not
+// one person. The cost backstop on the owner's key is the per-instance
+// GLOBAL ceiling (hourly + daily), counted only for shared-key analyses
+// (caller-key/BYOK analyses don't spend the owner's key). Honest limits:
+// counters are in-memory per warm instance, so ceilings are
+// per-instance, not fleet-wide. Mitigation, not authentication.
 const APP_CLIENT = "closeassist-web";
+const BUSY = "CloseAssist is getting a lot of use right this minute — wait a minute and try again.";
 const RL = new Map();
 function rateLimited(req, max, windowMs) {
   const now = Date.now();
@@ -46,6 +56,15 @@ function rateLimited(req, max, windowMs) {
   hits.push(now);
   RL.set(ip, hits);
   return hits.length > max;
+}
+const GLOBAL = { hour: [], day: [] };
+function globalCeiling(hourMax, dayMax) {
+  const now = Date.now();
+  GLOBAL.hour = GLOBAL.hour.filter((t) => now - t < 3600e3);
+  GLOBAL.day = GLOBAL.day.filter((t) => now - t < 86400e3);
+  if (GLOBAL.hour.length >= hourMax || GLOBAL.day.length >= dayMax) return true;
+  GLOBAL.hour.push(now); GLOBAL.day.push(now);
+  return false;
 }
 function corsOrigin(req) {
   if (process.env.ALLOWED_ORIGIN) return process.env.ALLOWED_ORIGIN;
@@ -66,8 +85,8 @@ export default async function handler(req, res) {
   if (req.headers["x-app-client"] !== APP_CLIENT) {
     return res.status(403).json({ error: "This endpoint only accepts requests from the CloseAssist app. If you're in the app, hard-refresh — your copy may be out of date." });
   }
-  if (rateLimited(req, 20, 10 * 60 * 1000)) {
-    return res.status(429).json({ error: "Lots of requests from your connection just now — wait a minute and try again." });
+  if (rateLimited(req, 120, 10 * 60 * 1000)) {
+    return res.status(429).json({ error: BUSY });
   }
 
   // Caller key (BYOK): Offer Compare's upload mode runs on the agent's own
@@ -105,6 +124,12 @@ export default async function handler(req, res) {
       });
     }
     if (usable.length > 12) return res.status(400).json({ error: "Max 12 offers per batch." });
+
+    // Global per-instance ceiling — the cost backstop on the owner's key.
+    // Only shared-key analyses count; a caller's own key spends their money.
+    if (!callerKey && globalCeiling(300, 1500)) {
+      return res.status(429).json({ error: BUSY });
+    }
 
     // Offers are sliced to 16k chars for the model — say which ones, so the
     // agent knows the comparison didn't see the whole document.
