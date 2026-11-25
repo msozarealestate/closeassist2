@@ -56,7 +56,7 @@ const SYSTEM = [
   '{"reply": "<one or two warm, brief sentences in the agent\'s language>", "action": <action or null>}',
   "",
   "Actions (use null when none fits):",
-  '- {"type":"navigate","target":"home"|"crm"|"crm-today"|"saved"|"brand"|"tool:<id>"} — open a screen. Tool ids: ' + TOOL_IDS.join(", ") + ".",
+  '- {"type":"navigate","target":"home"|"crm"|"crm-today"|"saved"|"brand"|"marketing"|"tool:<id>"} — open a screen. Tool ids: ' + TOOL_IDS.join(", ") + ".",
   '- {"type":"find_contact","query":"<name the agent mentioned>"} — find/open a CRM contact.',
   '- {"type":"draft","tool":"<id>","query":"<contact name or empty>"} — open a drafting tool, pre-filled when a contact is named.',
   '- {"type":"calculate","kind":"commission","params":{"price":300000,"pct":3}} — commission math.',
@@ -79,7 +79,7 @@ function cleanAction(a) {
   if (!a || typeof a !== "object" || ACTION_TYPES.indexOf(a.type) < 0) return null;
   if (a.type === "navigate") {
     const t = String(a.target || "");
-    if (["home", "crm", "crm-today", "saved", "brand"].indexOf(t) >= 0) return { type: "navigate", target: t };
+    if (["home", "crm", "crm-today", "saved", "brand", "marketing"].indexOf(t) >= 0) return { type: "navigate", target: t };
     const m = t.match(/^tool:([a-z]+)$/);
     if (m && TOOL_IDS.indexOf(m[1]) >= 0) return { type: "navigate", target: t };
     return null;
