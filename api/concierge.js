@@ -59,7 +59,7 @@ const SYSTEM = [
   '- {"type":"navigate","target":"home"|"crm"|"crm-today"|"saved"|"brand"|"marketing"|"tool:<id>"} — open a screen. Tool ids: ' + TOOL_IDS.join(", ") + ".",
   '- {"type":"find_contact","query":"<name the agent mentioned>"} — find/open a CRM contact.',
   '- {"type":"draft","tool":"<id>","query":"<contact name or empty>"} — open a drafting tool, pre-filled when a contact is named.',
-  '- {"type":"calculate","kind":"commission","params":{"price":300000,"pct":3}} — commission math.',
+  '- {"type":"calculate","kind":"commission","params":{"price":300000,"pct":3}} — quick commission math ONLY. If the agent asks for a commission STATEMENT or a net sheet (a document/form), navigate instead: {"type":"navigate","target":"tool:commission"} or {"type":"navigate","target":"tool:netsheet"}.',
   '- {"type":"calculate","kind":"deadlines","params":{"accept":"YYYY-MM-DD","closing":"YYYY-MM-DD or empty","emDays":5}} — Multi-Board 8.0 deadlines from an acceptance date.',
   '- {"type":"calculate","kind":"proration","params":{"annualTax":6000,"months":7,"county":"Cook"}} — tax proration.',
   '- {"type":"today"} — what follow-ups are due today.',
